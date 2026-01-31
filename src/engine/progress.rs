@@ -4,6 +4,21 @@ use kdam::{Animation, Bar, BarExt};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+/// Update the bar's total (e.g. during streaming when total grows). Refreshes the display.
+pub fn set_bar_total(pb: &Arc<Mutex<Bar>>, total: usize) {
+    if let Ok(mut bar) = pb.try_lock() {
+        bar.total = total;
+        let _ = bar.refresh();
+    }
+}
+
+/// Force a refresh of the bar (e.g. so counter shows "0 files" immediately).
+pub fn refresh_bar(pb: &Arc<Mutex<Bar>>) {
+    if let Ok(mut bar) = pb.try_lock() {
+        let _ = bar.refresh();
+    }
+}
+
 /// Configuration for creating a progress bar
 pub struct ProgressBarConfig {
     pub total: usize,

@@ -55,6 +55,10 @@ pub struct CommonArgs {
     /// Paranoid mode (check): re-hash files when hash matches but mtime/size differ (detect collisions). Default: false.
     #[arg(long)]
     pub paranoid: bool,
+
+    /// Encrypt the index database with SQLCipher. Prompts for passphrase (or use NEFAXER_DB_KEY / .env).
+    #[arg(long, short = 'x')]
+    pub encrypt: bool,
 }
 
 impl CommonArgs {

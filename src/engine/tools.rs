@@ -33,6 +33,7 @@ pub fn should_include_in_walk(
     path: &Path,
     root: &Path,
     db_canonical: &Option<PathBuf>,
+    temp_canonical: &Option<PathBuf>,
     exclude_patterns: &[String],
 ) -> bool {
     if path == root {
@@ -40,6 +41,11 @@ pub fn should_include_in_walk(
     }
     if let Some(db) = db_canonical
         && path == db.as_path()
+    {
+        return false;
+    }
+    if let Some(temp) = temp_canonical
+        && path == temp.as_path()
     {
         return false;
     }
@@ -131,6 +137,17 @@ fn check_for_root(path: &Path) -> Result<(), anyhow::Error> {
 #[cfg(not(unix))]
 fn check_for_root(_path: &Path) -> Result<(), anyhow::Error> {
     Ok(())
+}
+
+/// True if the process is running with effective uid 0 (e.g. via sudo).
+#[cfg(unix)]
+pub fn running_as_root() -> bool {
+    unsafe { libc::geteuid() == 0 }
+}
+
+#[cfg(not(unix))]
+pub fn running_as_root() -> bool {
+    false
 }
 
 pub fn check_root_and_canonicalize(path: &Path) -> Result<PathBuf> {

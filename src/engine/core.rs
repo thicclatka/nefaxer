@@ -1,18 +1,17 @@
 //! Core collection and processing logic
 
-use anyhow::{Context, Result};
-use jwalk::WalkDir;
-use kdam::{Animation, BarExt};
+use anyhow::Result;
+use crossbeam_channel::{Receiver, bounded};
 use log::debug;
 use rayon::prelude::*;
 use rusqlite::Connection;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Instant;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::thread::JoinHandle;
+use walkdir::WalkDir;
 
 use crate::disk_detect::determine_threads_for_drive;
-use crate::engine::parallel::{self, adaptive_progress_chunk_size};
-use crate::engine::progress;
 use crate::utils::config::{SMALL_FILE_THRESHOLD, WRITER_POOL_SIZE};
 use crate::utils::fd_limit::max_workers_by_fd_limit;
 use crate::{Entry, Opts};
@@ -20,212 +19,65 @@ use crate::{Entry, Opts};
 use super::hashing::hash_file;
 use super::tools::{check_root_and_canonicalize, path_relative_to, should_include_in_walk};
 
-/// Phase 1: Walk directories in parallel and filter paths
-fn walk_and_filter(
-    root: &Path,
-    db_canonical: &Option<PathBuf>,
-    opts: &Opts,
-    num_threads: usize,
-) -> Result<Vec<PathBuf>> {
-    let start = Instant::now();
-    debug!("Phase 1: Walking directories and filtering...");
+/// Path and entry channel capacity. Must be >= max path count so the walk never blocks on send
+/// and can drop path_tx promptly (lets workers see channel close and exit).
+const STREAMING_CHANNEL_CAP: usize = 50_000;
 
-    // Create collection counter if verbose
-    let collection_counter = if opts.verbose {
-        Some(progress::create_counter("Collecting files"))
+/// Process a single path into an Entry (metadata + optional hash).
+fn path_to_entry(abs_path: &Path, root: &Path, with_hash: bool) -> Result<Entry> {
+    let meta = std::fs::metadata(abs_path)?;
+    let mtime_ns = meta
+        .modified()
+        .map(|t| t.duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() as i64)
+        .unwrap_or(0);
+    let size = meta.len();
+    let is_file = meta.is_file();
+    let rel = path_relative_to(abs_path, root).unwrap_or_else(|| abs_path.to_path_buf());
+    let hash = if with_hash && is_file && size >= SMALL_FILE_THRESHOLD {
+        hash_file(abs_path, size)?
     } else {
         None
     };
-
-    let collection_count = AtomicUsize::new(0);
-
-    let error_count = AtomicUsize::new(0);
-    let first_error: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
-    let skipped_paths: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
-
-    let entries: Vec<_> = WalkDir::new(root)
-        .follow_links(opts.follow_links)
-        .skip_hidden(false)
-        .parallelism(jwalk::Parallelism::RayonNewPool(num_threads))
-        .into_iter()
-        .filter_map(|entry_result| match entry_result {
-            Ok(entry) => {
-                let path = entry.path();
-                if should_include_in_walk(&path, root, db_canonical, &opts.exclude) {
-                    progress::report_progress_batched(
-                        collection_counter.as_ref(),
-                        &collection_count,
-                        parallel::ProgressConsts::PROGRESS_UPDATE_BATCH_SIZE,
-                    );
-                    Some(path)
-                } else {
-                    None
-                }
-            }
-            Err(err) => {
-                error_count.fetch_add(1, Ordering::Relaxed);
-                if opts.strict {
-                    let _ = first_error.lock().unwrap().get_or_insert_with(|| {
-                        format!("strict mode: {} (path: {:?})", err, err.path())
-                    });
-                } else {
-                    log::warn!("Permission denied or error accessing path: {}", err);
-                }
-                if let Some(p) = err.path() {
-                    skipped_paths.lock().unwrap().push(p.to_path_buf());
-                }
-                None
-            }
-        })
-        .collect();
-
-    progress::flush_progress_remainder(
-        collection_counter.as_ref(),
-        collection_count.load(Ordering::Relaxed),
-        parallel::ProgressConsts::PROGRESS_UPDATE_BATCH_SIZE,
-    );
-
-    // Clear collection counter if it exists
-    if let Some(counter) = collection_counter
-        && let Ok(mut bar) = counter.try_lock()
-    {
-        let _ = bar.clear();
-    }
-
-    if opts.strict
-        && let Some(msg) = first_error.lock().unwrap().take()
-    {
-        return Err(anyhow::anyhow!("{}", msg));
-    }
-
-    let error_count_final = error_count.load(Ordering::Relaxed);
-    if error_count_final > 0 && !opts.strict {
-        log::warn!(
-            "Skipped {} paths due to permission errors or access issues",
-            error_count_final
-        );
-        if opts.verbose {
-            let paths = skipped_paths.lock().unwrap();
-            for p in paths.iter() {
-                eprintln!("  skipped: {}", p.display());
-            }
-        }
-    }
-
-    debug!(
-        "Found {} paths in {:.2}s",
-        entries.len(),
-        start.elapsed().as_secs_f64()
-    );
-    Ok(entries)
+    Ok(Entry {
+        path: rel,
+        mtime_ns,
+        size,
+        hash,
+    })
 }
 
-/// Phase 2: Read metadata and hash files in parallel
-fn read_metadata(
-    paths: Vec<PathBuf>,
-    root: &Path,
-    opts: &Opts,
-    num_threads: usize,
-) -> Result<Vec<Entry>> {
-    let start = Instant::now();
-    let entry_count = paths.len();
-    debug!("Reading metadata for {} entries...", entry_count);
+/// Result of [`collect_entries`]: (entries, writer_pool_size, path_count).
+type CollectEntriesResult = (Vec<Entry>, usize, usize);
 
-    let with_hash = opts.with_hash;
-
-    // Create progress bar if verbose
-    let pb = if opts.verbose {
-        let config = progress::ProgressBarConfig::new(entry_count, "Indexing", Animation::Classic);
-        Some(progress::create_progress_bar(config))
-    } else {
-        None
-    };
-
-    let chunk_size = adaptive_progress_chunk_size(
-        entry_count,
-        num_threads,
-        parallel::ProgressConsts::ADAPTIVE_PROGRESS_TARGET_UPDATES,
-    );
-    let counter = AtomicUsize::new(0);
-
-    // Build custom thread pool with adjusted thread count
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(num_threads)
-        .build()
-        .context("failed to build thread pool")?;
-
-    let collected: Vec<Result<Entry>> = pool.install(|| {
-        paths
-            .into_par_iter()
-            .map(|abs_path| {
-                let meta = std::fs::metadata(&abs_path)?;
-                let mtime_ns = meta
-                    .modified()
-                    .map(|t| t.duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() as i64)
-                    .unwrap_or(0);
-                let size = meta.len();
-                let is_file = meta.is_file();
-
-                // Convert to relative path
-                let rel = path_relative_to(&abs_path, root).unwrap_or_else(|| abs_path.clone());
-
-                // Skip hashing for small files (use mtime/size only; threshold in config)
-                let hash = if with_hash && is_file && size >= SMALL_FILE_THRESHOLD {
-                    hash_file(&abs_path, size)?
-                } else {
-                    None
-                };
-
-                progress::report_progress_batched(pb.as_ref(), &counter, chunk_size);
-
-                Ok(Entry {
-                    path: rel,
-                    mtime_ns,
-                    size,
-                    hash,
-                })
-            })
-            .collect()
-    });
-
-    progress::flush_progress_remainder(pb.as_ref(), entry_count, chunk_size);
-
-    debug!(
-        "Processed {} entries in {:.2}s",
-        entry_count,
-        start.elapsed().as_secs_f64()
-    );
-    if opts.strict {
-        collected
-            .into_iter()
-            .collect::<Result<Vec<_>, _>>()
-            .context("strict mode: metadata or hash error")
-    } else {
-        Ok(collected.into_iter().filter_map(Result::ok).collect())
-    }
+/// Handles returned by [`run_pipeline`] for streaming: receive entries and join when done.
+/// `path_count_rx`: receives the walk's path count when the walk finishes (use to set progress bar total).
+/// `is_network_drive`: true when indexing a network path (use counter-style progress, no total).
+pub struct PipelineHandles {
+    pub entry_rx: Receiver<Entry>,
+    pub path_count_rx: Receiver<usize>,
+    pub walk_handle: JoinHandle<usize>,
+    pub worker_handles: Vec<JoinHandle<()>>,
+    pub writer_pool_size: usize,
+    pub is_network_drive: bool,
+    pub first_error: Arc<Mutex<Option<String>>>,
+    pub skipped_paths: Arc<Mutex<Vec<PathBuf>>>,
 }
 
-/// Main orchestrator: Collect all entries under `root`.
-/// Returns (entries, writer_pool_size). Writer pool size is derived from drive type (1 if network, else WRITER_POOL_SIZE).
-///
-/// Phase 1: Walk directories in parallel and filter
-/// Phase 2: Read metadata and hash files in parallel
-pub fn collect_entries(
+/// Start the walk + metadata pipeline. Returns receiver and handles; caller receives from
+/// `entry_rx` and must join `walk_handle` and `worker_handles` when done.
+pub fn run_pipeline(
     root: &Path,
     opts: &Opts,
     db_path: &Path,
-    conn: &Connection,
-) -> Result<(Vec<Entry>, usize)> {
-    // Canonicalize paths (only once)
-    // Also check if root is owned by root user (UID 0) - security risk
+    temp_path: Option<&Path>,
+    _conn: &Connection,
+) -> Result<PipelineHandles> {
     let root = check_root_and_canonicalize(root)?;
     let db_canonical = db_path.canonicalize().ok();
+    let temp_canonical = temp_path.and_then(|p| p.canonicalize().ok());
 
-    // Detect drive type once; use for both worker threads and writer pool size
-    let (num_threads, drive_type) =
-        determine_threads_for_drive(&root, conn, rayon::current_num_threads());
-
-    // Cap threads by FD limit (avoid EMFILE during parallel walk)
+    let (num_threads, drive_type, parallel_walk) =
+        determine_threads_for_drive(&root, _conn, rayon::current_num_threads());
     let num_threads = match max_workers_by_fd_limit() {
         Some(fd_cap) if fd_cap < num_threads => {
             debug!(
@@ -236,22 +88,211 @@ pub fn collect_entries(
         }
         _ => num_threads,
     };
-
     let writer_pool_size = if drive_type.is_network() {
         1
     } else {
         WRITER_POOL_SIZE
     };
+    debug!("Writer pool size: {}", writer_pool_size);
+    if parallel_walk {
+        debug!("Walking in parallel");
+    } else {
+        debug!("Walking serially");
+    }
+
+    let (path_tx, path_rx) = bounded::<PathBuf>(STREAMING_CHANNEL_CAP);
+    let (entry_tx, entry_rx) = bounded::<Entry>(STREAMING_CHANNEL_CAP);
+    let (path_count_tx, path_count_rx) = bounded::<usize>(1);
+    let first_error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    let skipped_paths: Arc<Mutex<Vec<PathBuf>>> = Arc::new(Mutex::new(Vec::new()));
+
+    let root_w = root.clone();
+    let db_canonical_w = db_canonical.clone();
+    let temp_canonical_w = temp_canonical.clone();
+    let opts_w = opts.clone();
+    let first_error_w = Arc::clone(&first_error);
+    let skipped_paths_w = Arc::clone(&skipped_paths);
+
+    let walk_handle = thread::spawn(move || {
+        let mut count = 0_usize;
+        if parallel_walk {
+            use jwalk::Parallelism;
+            use std::time::Duration;
+            for entry_result in jwalk::WalkDir::new(&root_w)
+                .follow_links(opts_w.follow_links)
+                .parallelism(Parallelism::RayonDefaultPool {
+                    busy_timeout: Duration::from_secs(60),
+                })
+                .into_iter()
+            {
+                match entry_result {
+                    Ok(entry) => {
+                        let path = entry.path().to_path_buf();
+                        if should_include_in_walk(
+                            &path,
+                            &root_w,
+                            &db_canonical_w,
+                            &temp_canonical_w,
+                            &opts_w.exclude,
+                        ) {
+                            if path_tx.send(path).is_err() {
+                                break;
+                            }
+                            count += 1;
+                        }
+                    }
+                    Err(err) => {
+                        if opts_w.strict {
+                            let _ = first_error_w.lock().unwrap().get_or_insert_with(|| {
+                                format!("strict mode: {} (path: {:?})", err, err.path())
+                            });
+                            break;
+                        }
+                        log::warn!("Permission denied or error accessing path: {}", err);
+                        if let Some(p) = err.path() {
+                            skipped_paths_w.lock().unwrap().push(p.to_path_buf());
+                        }
+                    }
+                }
+            }
+        } else {
+            for entry_result in WalkDir::new(&root_w)
+                .follow_links(opts_w.follow_links)
+                .into_iter()
+            {
+                match entry_result {
+                    Ok(entry) => {
+                        let path = entry.into_path();
+                        if should_include_in_walk(
+                            &path,
+                            &root_w,
+                            &db_canonical_w,
+                            &temp_canonical_w,
+                            &opts_w.exclude,
+                        ) {
+                            if path_tx.send(path).is_err() {
+                                break;
+                            }
+                            count += 1;
+                        }
+                    }
+                    Err(err) => {
+                        if opts_w.strict {
+                            let _ = first_error_w.lock().unwrap().get_or_insert_with(|| {
+                                format!("strict mode: {} (path: {:?})", err, err.path())
+                            });
+                            break;
+                        }
+                        log::warn!("Permission denied or error accessing path: {}", err);
+                        if let Some(p) = err.path() {
+                            skipped_paths_w.lock().unwrap().push(p.to_path_buf());
+                        }
+                    }
+                }
+            }
+        }
+        let _ = path_count_tx.send(count);
+        drop(path_tx);
+        count
+    });
+
+    let root_c = root.clone();
+    let worker_handles: Vec<_> = (0..num_threads)
+        .map(|_worker_id| {
+            let path_rx = path_rx.clone();
+            let entry_tx = entry_tx.clone();
+            let root = root_c.clone();
+            thread::spawn(move || {
+                while let Ok(abs_path) = path_rx.recv() {
+                    if let Ok(entry) = path_to_entry(&abs_path, &root, false) {
+                        let _ = entry_tx.send(entry);
+                    }
+                }
+                drop(entry_tx);
+            })
+        })
+        .collect();
+
+    drop(entry_tx);
+
+    Ok(PipelineHandles {
+        entry_rx,
+        path_count_rx,
+        walk_handle,
+        worker_handles,
+        writer_pool_size,
+        is_network_drive: drive_type.is_network(),
+        first_error,
+        skipped_paths,
+    })
+}
+
+/// Fill hashes for entries that need them (size >= SMALL_FILE_THRESHOLD). Call after collect_entries when opts.with_hash.
+pub fn fill_hashes(entries: &mut [Entry], root: &Path) {
+    entries.par_iter_mut().for_each(|entry| {
+        if entry.size >= SMALL_FILE_THRESHOLD {
+            let abs = root.join(&entry.path);
+            if let Ok(Some(h)) = hash_file(&abs, entry.size) {
+                entry.hash = Some(h);
+            }
+        }
+    });
+}
+
+/// Main orchestrator: Collect all entries under `root` via streaming pipeline.
+/// Returns (entries, writer_pool_size, path_count). No progress bar here so kdam never blocks the pipeline; caller may create one for Phase 3 using path_count.
+/// Walk → path channel → workers (metadata) → entry channel → Vec.
+pub fn collect_entries(
+    root: &Path,
+    opts: &Opts,
+    db_path: &Path,
+    temp_path: Option<&Path>,
+    conn: &Connection,
+) -> Result<CollectEntriesResult> {
+    let PipelineHandles {
+        entry_rx,
+        path_count_rx: _path_count_rx,
+        walk_handle,
+        worker_handles,
+        writer_pool_size,
+        is_network_drive: _,
+        first_error,
+        skipped_paths,
+    } = run_pipeline(root, opts, db_path, temp_path, conn)?;
+
+    let mut entries = Vec::new();
+    while let Ok(entry) = entry_rx.recv() {
+        entries.push(entry);
+    }
     debug!(
-        "Drive type: {:?} | Active threads: {} | Writer pool size: {}",
-        drive_type, num_threads, writer_pool_size
+        "main: channel closed, total {} entries (metadata phase done)",
+        entries.len()
     );
 
-    // Phase 1: Walk and filter
-    let paths = walk_and_filter(&root, &db_canonical, opts, num_threads)?;
+    let path_count = walk_handle
+        .join()
+        .map_err(|_| anyhow::anyhow!("walk thread panicked"))?;
+    for h in worker_handles {
+        let _ = h.join();
+    }
 
-    // Phase 2: Read metadata
-    let entries = read_metadata(paths, &root, opts, num_threads)?;
+    if opts.strict
+        && let Some(msg) = first_error.lock().unwrap().take()
+    {
+        return Err(anyhow::anyhow!("{}", msg));
+    }
+    let skipped = skipped_paths.lock().unwrap().len();
+    if skipped > 0 && !opts.strict {
+        log::warn!(
+            "Skipped {} paths due to permission errors or access issues",
+            skipped
+        );
+        if opts.verbose {
+            for p in skipped_paths.lock().unwrap().iter() {
+                eprintln!("  skipped: {}", p.display());
+            }
+        }
+    }
 
-    Ok((entries, writer_pool_size))
+    Ok((entries, writer_pool_size, path_count))
 }
