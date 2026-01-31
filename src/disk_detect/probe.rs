@@ -56,14 +56,16 @@ pub struct NetworkInfo {
 }
 
 /// Detect optimal worker count with caching (stored in the nefaxer DB diskinfo table).
+/// For network drives also returns use_parallel_walk (true when cached disk type contains "SSD").
 pub fn detect_optimal_workers(
     path: &Path,
     base_drive_type: DriveType,
     conn: &Connection,
-) -> Result<usize> {
+) -> Result<(usize, bool)> {
     // Only probe if it's a network mount
     if !base_drive_type.is_network() {
-        return Ok(base_drive_type.worker_threads(rayon::current_num_threads()));
+        let workers = base_drive_type.worker_threads(rayon::current_num_threads());
+        return Ok((workers, false)); // use_parallel_walk ignored for non-network
     }
 
     let root_key = path.to_string_lossy();
@@ -98,6 +100,7 @@ pub fn detect_optimal_workers(
 
     // Calculate optimal workers
     let workers = calculate_workers(&disk_type_info, &network_info);
+    let use_parallel_walk = disk_type_info.drive_type.contains("SSD");
 
     // Save cache to DB (update network info)
     let cache_data = DiskInfo {
@@ -107,14 +110,14 @@ pub fn detect_optimal_workers(
     };
     save_cache_to_db(conn, &root_key, &cache_data)?;
 
-    info!(
+    debug!(
         "Drive: {}, Network latency: {:.1}ms, Workers: {}",
         cache_data.disk_type.drive_type,
         cache_data.network.as_ref().unwrap().latency_ms,
         workers
     );
 
-    Ok(workers)
+    Ok((workers, use_parallel_walk))
 }
 
 /// Probe remote disk type using random I/O test

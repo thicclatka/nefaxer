@@ -1,5 +1,6 @@
 //! Cross-platform disk type detection for performance tuning
 
+use log::debug;
 use std::path::Path;
 
 use rusqlite::Connection;
@@ -92,21 +93,30 @@ fn detect_drive_type(path: &Path) -> DriveType {
     }
 }
 
-/// Returns (num_threads, drive_type). Use drive_type for writer pool size (e.g. 1 if network).
+/// Returns (num_threads, drive_type, use_parallel_walk).
+/// use_parallel_walk: true for SSD and Network+SSD (jwalk), false for HDD and Network+HDD (walkdir).
 pub fn determine_threads_for_drive(
     path: &Path,
     conn: &Connection,
     available_threads: usize,
-) -> (usize, DriveType) {
+) -> (usize, DriveType, bool) {
     let limits = WorkerThreadLimits::default();
     let drive_type = drive_type_for_path(path);
-    let num_threads = match drive_type {
-        DriveType::SSD => available_threads,
-        DriveType::HDD => available_threads.min(limits.hdd_max),
-        DriveType::Network => {
-            probe::detect_optimal_workers(path, drive_type, conn).unwrap_or(available_threads)
-        }
-        DriveType::Unknown => available_threads.min(limits.floor),
+    let (num_threads, use_parallel_walk) = match drive_type {
+        DriveType::SSD => (available_threads, true),
+        DriveType::HDD => (available_threads.min(limits.hdd_max), false),
+        DriveType::Network => probe::detect_optimal_workers(path, drive_type, conn)
+            .unwrap_or((available_threads, false)),
+        DriveType::Unknown => (available_threads.min(limits.floor), false),
     };
-    (num_threads, drive_type)
+    match drive_type {
+        DriveType::Network => {}
+        _ => {
+            debug!(
+                "Drive type: {:?}, using {} threads",
+                drive_type, num_threads
+            );
+        }
+    }
+    (num_threads, drive_type, use_parallel_walk)
 }
