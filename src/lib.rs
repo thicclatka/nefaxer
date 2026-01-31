@@ -46,4 +46,6 @@ pub struct Opts {
     pub strict: bool,
     /// Paranoid mode (check): re-hash when hash matches but mtime/size differ.
     pub paranoid: bool,
+    /// Encrypt the index database with SQLCipher.
+    pub encrypt: bool,
 }
