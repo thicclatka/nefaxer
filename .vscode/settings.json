@@ -1,0 +1,63 @@
+{
+  "workbench.colorTheme": "paddy-yesterday",
+  "files.exclude": {
+    "**/target": true,
+    "**/.DS_Store": true
+  },
+
+  "search.exclude": {
+    "**/target": true,
+    "**/.git": true,
+    "**/Cargo.lock": true
+  },
+
+  "files.watcherExclude": {
+    "**/.git/objects/**": true,
+    "**/.git/subtree-cache/**": true,
+    "**/target/**": true
+  },
+
+  "files.associations": {
+    "*.env": "properties",
+    "*.env.*": "properties",
+    "docker-compose.yml": "dockercompose",
+    "Dockerfile*": "dockerfile"
+  },
+
+  // File nesting - enable and configure patterns
+  "explorer.fileNesting.enabled": true,
+  "explorer.fileNesting.expand": false,
+  "explorer.fileNesting.patterns": {
+    ".gitignore": ".pre-commit-config.yaml, cspell.json, release-changelog-builder-config.json",
+    "Cargo.toml": "Cargo.lock",
+    "cargo.toml": "Cargo.lock",
+    "README.md": "LICENSE-MIT, LICENSE-APACHE"
+  },
+
+  // Git settings
+  "git.ignoreLimitWarning": true,
+  "git.autofetch": true,
+
+  // File formatting
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true,
+  "files.trimFinalNewlines": true,
+  "files.encoding": "utf8",
+  "files.eol": "\n",
+
+  // Editor settings
+  "[rust]": {
+    "editor.defaultFormatter": "rust-lang.rust-analyzer",
+    "editor.formatOnSave": true,
+    "editor.tabSize": 4
+  },
+  "[toml]": {
+    "editor.tabSize": 2
+  },
+  "[yaml]": {
+    "editor.tabSize": 2
+  },
+  "[markdown]": {
+    "files.trimTrailingWhitespace": false
+  }
+}

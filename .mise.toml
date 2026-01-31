@@ -1,0 +1,22 @@
+[tools]
+rust = "1.93"
+
+[tasks.clip]
+description = "Run clippy linter"
+run = "cargo clippy -- -D warnings"
+
+[tasks.br]
+description = "Build release binary"
+run = "cargo build --release"
+
+[tasks.bt]
+description = "Build test binary"
+run = "cargo build"
+
+[tasks.check]
+description = "Run all checks (format, lint, test)"
+run = ["cargo fmt --all --check", "cargo clippy -- -D warnings", "cargo test"]
+
+[tasks.fmt]
+description = "Run rustfmt"
+run = "cargo fmt --all"

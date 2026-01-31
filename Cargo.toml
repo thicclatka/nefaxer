@@ -1,0 +1,15 @@
+[package]
+name = "nefaxer"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.93"
+authors = ["AHurowitz <thicclatka@users.noreply.github.com>"]
+license = "MIT or Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/AHurowitz/nefaxer"
+
+[dependencies]
+anyhow = "1.0.100"
+
+[dev-dependencies]
+anyhow = "1.0.100"
