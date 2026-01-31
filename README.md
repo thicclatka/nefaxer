@@ -3,11 +3,12 @@
 ![Build](https://github.com/thicclatka/nefaxer/workflows/Build/badge.svg)
 ![Rust](https://img.shields.io/badge/rust-1.93-orange.svg)
 
-**Nefaxer** is a high-performance directory indexing and change detection tool written in Rust. It walks directory trees in parallel, computes cryptographic hashes (Blake3) of file contents, and stores metadata in a fast SQLite database. Compare the current state of a directory against a previous snapshot to detect additions, deletions, and modifications.
+**Nefaxer** is a high-performance directory indexing and change detection tool written in Rust. It walks directory trees in parallel, computes hashes of file contents, and stores metadata in a fast indexed database. Compare the current state of a directory against a previous snapshot to detect additions, deletions, and modifications.
 
 ## Features
 
-- **Parallel walk** (jwalk) and **parallel metadata/hashing** (rayon)
+- **Streaming pipeline** — Walk thread sends paths over a bounded channel; metadata workers turn paths into entries; the main thread receives entries, optionally hashes large files (when `--check-hash`), and writes batches to file. No full-tree buffering: walk, metadata, and write run concurrently.
+- **Drive-adaptive walk** — Serial walk (`walkdir`) where the disk is the bottleneck, otherwise parallel (`jwalk`). Parallel metadata (worker threads); hashing when enabled is sequential in the receiver.
 - **Drive-type detection** (SSD / HDD / network) for automatic thread and writer-pool tuning
 - **WAL** SQLite with batch inserts, optional in-memory index for small dirs (<10K files), writer pool
 - **Exclude patterns** (`-e`) for gitignore-like filtering

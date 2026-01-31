@@ -61,5 +61,8 @@ test-data/
 Thumbs.db
 
 # Project-specific
+.env
+.env.*
+!.env.example
 .nefaxer
 TODO.md
