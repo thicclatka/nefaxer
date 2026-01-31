@@ -13,8 +13,8 @@ pub mod tools;
 pub use arg_parser::{Cli, Commands, CommonArgs};
 pub use core::collect_entries;
 pub use db_ops::{
-    apply_index_diff, apply_index_diff_pooled, backup_to_file, load_index, open_db,
-    open_db_in_memory, StoredMeta,
+    StoredMeta, apply_index_diff, apply_index_diff_pooled, backup_to_file, load_index, open_db,
+    open_db_in_memory,
 };
 pub use handlers::{handle_check, handle_index};
 pub use hashing::{hash_equals, hash_file};

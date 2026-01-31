@@ -10,7 +10,7 @@
 - **Parallel walk** (jwalk) and **parallel metadata/hashing** (rayon)
 - **Drive-type detection** (SSD / HDD / network) for automatic thread and writer-pool tuning
 - **WAL** SQLite with batch inserts, optional in-memory index for small dirs (<10K files), writer pool
-- **Exclude patterns** (`-e`) and **gitignore**-like aware walking
+- **Exclude patterns** (`-e`) for gitignore-like filtering
 - **Strict mode** (`--strict`): fail on first permission/access error instead of skipping
 - **Paranoid mode** (`--paranoid`, check only): re-hash when hash matches but mtime/size differ (collision check)
 - **FD limit capping** (Unix): cap worker threads by `ulimit -n` to avoid EMFILE

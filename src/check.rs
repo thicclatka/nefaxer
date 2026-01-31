@@ -40,7 +40,9 @@ pub fn check_dir(root: &Path, db_path: &Path, opts: &Opts) -> Result<Diff> {
                         && hash_equals(hash, old_hash)
                     {
                         let abs = root.join(path);
-                        if let Ok(meta) = std::fs::metadata(&abs) && meta.is_file() {
+                        if let Ok(meta) = std::fs::metadata(&abs)
+                            && meta.is_file()
+                        {
                             if let Ok(Some(rehash)) = hash_file(&abs, meta.len()) {
                                 rehash.as_slice() != old_hash.as_deref().unwrap_or(&[])
                             } else {

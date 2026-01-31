@@ -1,7 +1,6 @@
 //! Path and filter utilities
 
 use anyhow::{Context, Result};
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
 /// Convert absolute path to relative path from base
@@ -116,7 +115,8 @@ pub fn mtime_changed(new_mtime: i64, old_mtime: i64, tolerance_ns: i64) -> bool 
 }
 
 #[cfg(unix)]
-pub fn check_for_root(path: &Path) -> Result<(), anyhow::Error> {
+fn check_for_root(path: &Path) -> Result<(), anyhow::Error> {
+    use std::os::unix::fs::MetadataExt;
     let root_meta = std::fs::metadata(path).context("read root metadata")?;
     if root_meta.uid() == 0 {
         anyhow::bail!(
@@ -125,6 +125,11 @@ pub fn check_for_root(path: &Path) -> Result<(), anyhow::Error> {
             path.display()
         );
     }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn check_for_root(_path: &Path) -> Result<(), anyhow::Error> {
     Ok(())
 }
 
