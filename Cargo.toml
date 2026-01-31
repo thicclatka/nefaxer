@@ -1,14 +1,20 @@
 [package]
 name = "nefaxer"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.93"
 authors = ["AHurowitz <thicclatka@users.noreply.github.com>"]
 license = "MIT or Apache-2.0"
 readme = "README.md"
-repository = "https://github.com/AHurowitz/nefaxer"
-keywords = []
-categories = ["utilities"]
+repository = "https://github.com/thicclatka/nefaxer"
+keywords = ["directory", "index", "diff", "sqlite", "change-detection"]
+categories = [
+  "command-line-utilities",
+  "development-tools",
+  "filesystem",
+  "database",
+  "caching",
+]
 
 [[bin]]
 name = "nefaxer"

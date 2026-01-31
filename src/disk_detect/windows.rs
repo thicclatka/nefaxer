@@ -1,7 +1,7 @@
 //! Windows-specific disk type detection using sysinfo WMI
 
-use super::network::{is_network_fs, is_network_mount};
 use super::DriveType;
+use super::network::{is_network_fs, is_network_mount};
 use log::debug;
 use std::path::Path;
 use sysinfo::Disks;
