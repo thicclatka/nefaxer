@@ -1,0 +1,129 @@
+//! Application configuration constants.
+//! Tuning and thresholds in one place.
+
+use std::sync::OnceLock;
+
+// ---- Package / paths (from CARGO_PKG_NAME, cached) ----
+
+/// Package-derived paths: built once from `CARGO_PKG_NAME`, then cached.
+pub struct PackagePaths {
+    pkg_name: &'static str,
+    db_filename: String,
+    probe_dir_name: String,
+}
+
+static PACKAGE_PATHS: OnceLock<PackagePaths> = OnceLock::new();
+
+impl PackagePaths {
+    /// Build and cache paths from `CARGO_PKG_NAME`. Called once on first use.
+    pub fn get() -> &'static PackagePaths {
+        PACKAGE_PATHS.get_or_init(|| {
+            let pkg = env!("CARGO_PKG_NAME");
+            PackagePaths {
+                pkg_name: pkg,
+                db_filename: format!(".{pkg}"),
+                probe_dir_name: format!(".{pkg}_probe"),
+            }
+        })
+    }
+
+    pub fn pkg_name(&self) -> &str {
+        self.pkg_name
+    }
+
+    pub fn output_filename(&self) -> &str {
+        &self.db_filename
+    }
+
+    pub fn probe_dir_name(&self) -> &str {
+        &self.probe_dir_name
+    }
+}
+
+// ---- Worker threads ----
+
+/// Thread limits for drive-type-based tuning.
+/// Use [`WorkerThreadLimits::current()`] to fill `all_threads` from rayon; the rest are const.
+#[derive(Clone, Copy, Debug)]
+pub struct WorkerThreadLimits {
+    /// Available threads (from rayon); set by [`WorkerThreadLimits::current()`].
+    pub all_threads: usize,
+    /// Max threads for HDD (spinning disk).
+    pub hdd_max: usize,
+    /// Floor / minimum for network or unknown (conservative).
+    pub floor: usize,
+    /// Max threads when drive type is unknown.
+    pub unknown_max: usize,
+    /// Max threads when drive type is network.
+    pub network_max: usize,
+}
+
+impl Default for WorkerThreadLimits {
+    fn default() -> Self {
+        Self {
+            all_threads: 0, // use current() to set from rayon
+            hdd_max: Self::HDD_THREADS,
+            floor: Self::FLOOR_THREADS,
+            unknown_max: Self::UNKNOWN_MAX_THREADS,
+            network_max: Self::NETWORK_MAX_THREADS,
+        }
+    }
+}
+
+impl WorkerThreadLimits {
+    pub const HDD_THREADS: usize = 4;
+    pub const FLOOR_THREADS: usize = 2;
+    pub const UNKNOWN_MAX_THREADS: usize = 8;
+    pub const NETWORK_MAX_THREADS: usize = 12;
+
+    /// Build limits with `all_threads` set from `rayon::current_num_threads()`.
+    /// Call this at runtime when you need the effective available thread count.
+    pub fn current() -> Self {
+        Self {
+            all_threads: rayon::current_num_threads(),
+            ..Self::default()
+        }
+    }
+}
+
+// ---- Progress / chunking ----
+
+/// Progress bar and adaptive chunk tuning.
+pub struct ProgressConsts;
+
+impl ProgressConsts {
+    /// Batch size for progress bar updates during directory walk (reduce lock contention).
+    pub const PROGRESS_UPDATE_BATCH_SIZE: usize = 100;
+    /// Target number of progress updates across all workers in read_metadata (~100 total).
+    pub const ADAPTIVE_PROGRESS_TARGET_UPDATES: usize = 100;
+    /// Minimum chunk size for adaptive progress (avoid too-frequent updates).
+    pub const ADAPTIVE_CHUNK_MIN: usize = 10;
+}
+
+// ---- Hashing ----
+
+/// Hashing I/O thresholds and buffer sizes.
+pub struct HashingConsts;
+
+impl HashingConsts {
+    /// File size above which hashing uses memory-mapped I/O (bytes). 100 MB.
+    pub const HASH_MMAP_THRESHOLD: u64 = 100 * 1024 * 1024;
+    /// Chunk size for reading files below mmap threshold (bytes). 1 MB.
+    pub const HASH_READ_CHUNK_SIZE: usize = 1024 * 1024;
+}
+
+// ---- Indexing ----
+
+/// Files smaller than this are not hashed; mtime/size only (bytes).
+pub const SMALL_FILE_THRESHOLD: u64 = 4 * 1024; // 4 KB
+
+// ---- Database ----
+
+/// Batch size for DB insert/update chunks (balance transaction size vs round-trips).
+pub const DB_INSERT_BATCH_SIZE: usize = 1000;
+
+/// Number of writer connections for WAL; each writes a partition to reduce lock hold time.
+pub const WRITER_POOL_SIZE: usize = 4;
+
+/// When indexing fewer than this many files, use an in-memory DB then backup to disk (avoids WAL contention).
+pub const IN_MEMORY_INDEX_THRESHOLD: usize = 10_000;
