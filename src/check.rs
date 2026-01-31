@@ -5,15 +5,21 @@ use log::debug;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::engine::{collect_entries, hash_equals, hash_file, load_index, mtime_changed, open_db};
+use crate::engine::{
+    collect_entries, fill_hashes, hash_equals, hash_file, load_index, mtime_changed,
+    open_db_or_detect_encrypted,
+};
 use crate::utils::Colors;
 use crate::{Diff, Opts};
 
 /// Compare directory at `root` to the index in `db_path`. Returns added/removed/modified paths (relative).
 pub fn check_dir(root: &Path, db_path: &Path, opts: &Opts) -> Result<Diff> {
-    let conn = open_db(db_path)?;
+    let (conn, _) = open_db_or_detect_encrypted(db_path, root)?;
     let index = load_index(&conn)?;
-    let (current, _) = collect_entries(root, opts, db_path, &conn)?;
+    let (mut current, _, _) = collect_entries(root, opts, db_path, None, &conn)?;
+    if opts.with_hash {
+        fill_hashes(&mut current, root);
+    }
 
     let current_map: HashMap<PathBuf, (i64, u64, Option<[u8; 32]>)> = current
         .into_iter()
