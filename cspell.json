@@ -1,0 +1,25 @@
+{
+  "version": "0.2",
+  "ignorePaths": [],
+  "dictionaryDefinitions": [],
+  "dictionaries": [],
+  "words": [
+    "autocheckpoint",
+    "codegen",
+    "donotpresent",
+    "EMFILE",
+    "fstypename",
+    "getrlimit",
+    "jwalk",
+    "libc",
+    "MSVC",
+    "nefaxer",
+    "NOFILE",
+    "rlim",
+    "RLIMIT",
+    "statfs",
+    "sysinfo"
+  ],
+  "ignoreWords": [],
+  "import": []
+}
