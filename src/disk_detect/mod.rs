@@ -6,6 +6,7 @@ use std::path::Path;
 use rusqlite::Connection;
 
 use crate::utils::config::WorkerThreadLimits;
+use crate::utils::fd_limit::determine_threads_given_fd_limit;
 
 // Platform-specific modules
 #[cfg(target_os = "linux")]
@@ -109,14 +110,15 @@ pub fn determine_threads_for_drive(
             .unwrap_or((available_threads, false)),
         DriveType::Unknown => (available_threads.min(limits.floor), false),
     };
-    match drive_type {
-        DriveType::Network => {}
-        _ => {
-            debug!(
-                "Drive type: {:?}, using {} threads",
-                drive_type, num_threads
-            );
-        }
+
+    let num_threads_to_use = determine_threads_given_fd_limit(num_threads);
+
+    if drive_type != DriveType::Network {
+        debug!(
+            "Drive type: {:?}, using {} threads",
+            drive_type, num_threads_to_use
+        );
     }
-    (num_threads, drive_type, use_parallel_walk)
+
+    (num_threads_to_use, drive_type, use_parallel_walk)
 }

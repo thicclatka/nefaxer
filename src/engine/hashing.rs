@@ -3,10 +3,13 @@
 use anyhow::Result;
 use blake3::Hasher;
 use memmap2::Mmap;
+use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use std::fs::File;
 use std::path::Path;
 
+use crate::Entry;
 use crate::utils::config::HashingConsts;
+use crate::utils::config::SMALL_FILE_THRESHOLD;
 
 /// Hash a file with blake3. Uses memory-mapped I/O for files above threshold, chunked reading otherwise.
 pub fn hash_file(path: &Path, size: u64) -> Result<Option<[u8; 32]>> {
@@ -42,4 +45,16 @@ pub fn hash_equals(hash1: &Option<[u8; 32]>, hash2: &Option<Vec<u8>>) -> bool {
         (Some(a), Some(b)) => a.as_slice() == b.as_slice(),
         _ => false,
     }
+}
+
+/// Fill hashes for entries that need them (size >= SMALL_FILE_THRESHOLD). Call after collect_entries when opts.with_hash.
+pub fn fill_hashes(entries: &mut [Entry], root: &Path) {
+    entries.par_iter_mut().for_each(|entry| {
+        if entry.size >= SMALL_FILE_THRESHOLD {
+            let abs = root.join(&entry.path);
+            if let Ok(Some(h)) = hash_file(&abs, entry.size) {
+                entry.hash = Some(h);
+            }
+        }
+    });
 }

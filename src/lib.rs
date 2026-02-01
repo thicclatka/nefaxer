@@ -4,6 +4,7 @@ pub mod check;
 pub mod disk_detect;
 pub mod engine;
 pub mod index;
+pub mod pipeline;
 pub mod utils;
 
 use std::path::PathBuf;

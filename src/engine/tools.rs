@@ -3,6 +3,8 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
+use crate::utils::config::PackagePaths;
+
 /// Convert absolute path to relative path from base
 pub fn path_relative_to(path: &Path, base: &Path) -> Option<PathBuf> {
     path.strip_prefix(base).ok().map(|p| p.to_path_buf())
@@ -154,4 +156,26 @@ pub fn check_root_and_canonicalize(path: &Path) -> Result<PathBuf> {
     let path = path.canonicalize().context("canonicalize path")?;
     check_for_root(&path)?;
     Ok(path)
+}
+
+pub fn canonicalize_paths(
+    root: &Path,
+    db_path: &Path,
+    temp_path: Option<&Path>,
+) -> Result<(PathBuf, Option<PathBuf>, Option<PathBuf>)> {
+    let root = check_root_and_canonicalize(root)?;
+    let db_canonical = db_path.canonicalize().ok();
+    let temp_canonical = temp_path.and_then(|p| p.canonicalize().ok());
+    Ok((root, db_canonical, temp_canonical))
+}
+
+pub fn temp_path_for(db_path: &Path) -> PathBuf {
+    let name = db_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_else(|| PackagePaths::get().output_filename());
+    db_path
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join(format!("{name}.tmp"))
 }

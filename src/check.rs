@@ -6,9 +6,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::engine::{
-    collect_entries, fill_hashes, hash_equals, hash_file, load_index, mtime_changed,
-    open_db_or_detect_encrypted,
+    fill_hashes, hash_equals, hash_file, load_index, mtime_changed, open_db_or_detect_encrypted,
 };
+use crate::pipeline::collect_entries;
 use crate::utils::Colors;
 use crate::{Diff, Opts};
 
@@ -16,7 +16,8 @@ use crate::{Diff, Opts};
 pub fn check_dir(root: &Path, db_path: &Path, opts: &Opts) -> Result<Diff> {
     let (conn, _) = open_db_or_detect_encrypted(db_path, root)?;
     let index = load_index(&conn)?;
-    let (mut current, _, _) = collect_entries(root, opts, db_path, None, &conn)?;
+    let (mut current, _, _): (Vec<crate::Entry>, usize, usize) =
+        collect_entries(root, opts, db_path, None, &conn)?;
     if opts.with_hash {
         fill_hashes(&mut current, root);
     }

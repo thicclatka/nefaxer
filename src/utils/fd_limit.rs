@@ -1,5 +1,7 @@
 //! File descriptor limit detection for capping concurrent operations (Unix).
 
+use log::debug;
+
 /// Estimated number of file descriptors used per walk worker (dir handles, files, etc.).
 pub const FDS_PER_WORKER: usize = 10;
 
@@ -38,4 +40,17 @@ pub fn max_workers_by_fd_limit() -> Option<usize> {
         return Some(1);
     }
     Some(usable / FDS_PER_WORKER)
+}
+
+pub fn determine_threads_given_fd_limit(num_threads: usize) -> usize {
+    match max_workers_by_fd_limit() {
+        Some(fd_cap) if fd_cap < num_threads => {
+            debug!(
+                "Capping threads {} -> {} (FD limit ~80%)",
+                num_threads, fd_cap
+            );
+            fd_cap
+        }
+        _ => num_threads,
+    }
 }

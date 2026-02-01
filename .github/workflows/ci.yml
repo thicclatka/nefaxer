@@ -21,6 +21,16 @@ jobs:
         with:
           toolchain: stable
 
+      - name: Install OpenSSL (Windows)
+        if: runner.os == 'Windows'
+        run: choco install openssl -y
+        shell: pwsh
+
+      - name: Set OPENSSL_DIR (Windows)
+        if: runner.os == 'Windows'
+        run: echo "OPENSSL_DIR=C:\Program Files\OpenSSL-Win64" >> $env:GITHUB_ENV
+        shell: pwsh
+
       - name: Cache Cargo dependencies
         uses: actions/cache@v4
         with:
@@ -79,6 +89,16 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
+
+      - name: Install OpenSSL (Windows)
+        if: runner.os == 'Windows'
+        run: choco install openssl -y
+        shell: pwsh
+
+      - name: Set OPENSSL_DIR (Windows)
+        if: runner.os == 'Windows'
+        run: echo "OPENSSL_DIR=C:\Program Files\OpenSSL-Win64" >> $env:GITHUB_ENV
+        shell: pwsh
 
       - name: Build
         run: cargo build --release
