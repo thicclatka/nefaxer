@@ -53,7 +53,9 @@ anyhow = "1.0.100"
 
 [profile.release]
 opt-level = "s"
-lto = true
+lto = "fat"
 panic = "abort"
 codegen-units = 1
 strip = true
+debug = false
+overflow-checks = false

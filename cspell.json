@@ -5,6 +5,7 @@
   "dictionaries": [],
   "words": [
     "autocheckpoint",
+    "choco",
     "codegen",
     "donotpresent",
     "EMFILE",
@@ -13,6 +14,7 @@
     "getrlimit",
     "jwalk",
     "libc",
+    "libcrypto",
     "MSVC",
     "nefaxer",
     "nefaxing",
@@ -21,6 +23,7 @@
     "RLIMIT",
     "sqlcipher",
     "statfs",
+    "Subdirs",
     "sysinfo"
   ],
   "ignoreWords": [],
