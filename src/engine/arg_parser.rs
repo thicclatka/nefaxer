@@ -1,4 +1,4 @@
-use clap::{Args, Parser, Subcommand};
+use clap::Parser;
 use std::path::PathBuf;
 
 use crate::utils::config::PackagePaths;
@@ -9,17 +9,11 @@ impl DefaultArgs {
     pub const DIR: &'static str = ".";
 }
 
-#[derive(Parser)]
+/// High-performance directory indexer with content-aware diffing.
+#[derive(Clone, Parser)]
 #[command(name = "nefaxer")]
-#[command(about = "High-performance directory indexer with content-aware diffing")]
+#[command(about = "Index a directory; use --dry-run to compare without writing.")]
 pub struct Cli {
-    #[command(subcommand)]
-    pub command: Commands,
-}
-
-/// Shared options for index and check.
-#[derive(Clone, Args)]
-pub struct CommonArgs {
     /// Directory to index. Default: current directory.
     #[arg(value_name = "DIR", default_value = DefaultArgs::DIR)]
     pub dir: PathBuf,
@@ -27,6 +21,14 @@ pub struct CommonArgs {
     /// Path to nefaxer index file. Default: `.nefaxer` in DIR.
     #[arg(long, short)]
     pub db: Option<PathBuf>,
+
+    /// Compare to index and report added/removed/modified; do not write to the index.
+    #[arg(long)]
+    pub dry_run: bool,
+
+    /// List each changed path. If total changes exceed threshold, write to nefaxer.results instead of stdout.
+    #[arg(long, short = 'l')]
+    pub list: bool,
 
     /// Verbose output. Default: false.
     #[arg(long, short = 'v')]
@@ -37,7 +39,7 @@ pub struct CommonArgs {
     pub check_hash: bool,
 
     /// Follow symbolic links. Default: false.
-    #[arg(long, short = 'l')]
+    #[arg(long, short = 'f')]
     pub follow_links: bool,
 
     /// Mtime tolerance window in seconds. Files within this window are considered unchanged. Default: 0 (exact match).
@@ -52,7 +54,7 @@ pub struct CommonArgs {
     #[arg(long)]
     pub strict: bool,
 
-    /// Paranoid mode (check): re-hash files when hash matches but mtime/size differ (detect collisions). Default: false.
+    /// Paranoid mode: re-hash files when hash matches but mtime/size differ (detect collisions). Default: false.
     #[arg(long)]
     pub paranoid: bool,
 
@@ -61,26 +63,11 @@ pub struct CommonArgs {
     pub encrypt: bool,
 }
 
-impl CommonArgs {
+impl Cli {
     /// Get the database path, defaulting to package db filename in the target directory.
     pub fn db_path(&self) -> PathBuf {
         self.db
             .clone()
             .unwrap_or_else(|| self.dir.join(PackagePaths::get().output_filename()))
     }
-}
-
-#[derive(Subcommand)]
-pub enum Commands {
-    /// Walk directory and write/update the index database.
-    Index {
-        #[command(flatten)]
-        common: CommonArgs,
-    },
-
-    /// Compare directory to existing index; report added/removed/modified paths.
-    Check {
-        #[command(flatten)]
-        common: CommonArgs,
-    },
 }

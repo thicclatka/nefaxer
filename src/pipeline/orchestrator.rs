@@ -15,12 +15,12 @@ use crate::utils::config::WorkerThreadLimits;
 pub fn run_pipeline(
     root: &Path,
     opts: &Opts,
-    db_path: &Path,
+    db_path: Option<&Path>,
     temp_path: Option<&Path>,
     conn: &Connection,
 ) -> Result<pipeline::PipelineHandles> {
     let (root, db_canonical, temp_canonical, tuning) =
-        setup_pipeline_root_and_tuning(root, db_path, temp_path, conn)?;
+        setup_pipeline_root_and_tuning(root, opts, db_path, temp_path, conn)?;
 
     let channels = pipeline::create_pipeline_channels(&root, &db_canonical, &temp_canonical, opts);
 
@@ -53,10 +53,26 @@ pub fn run_pipeline(
     })
 }
 
+/// Shut down the pipeline by joining walk and worker threads (after stream is drained).
+/// Use when you've consumed `entry_rx` and only need to wait for threads to exit; no progress bar.
+pub fn shutdown_pipeline_handles(
+    walk_handle: std::thread::JoinHandle<usize>,
+    worker_handles: Vec<std::thread::JoinHandle<()>>,
+) -> Result<()> {
+    walk_handle
+        .join()
+        .map_err(|_| anyhow::anyhow!("walk thread panicked"))?;
+    for h in worker_handles {
+        let _ = h.join();
+    }
+    Ok(())
+}
+
 /// Canonicalize root and paths, detect drive type, compute thread count and writer pool size.
 pub fn setup_pipeline_root_and_tuning(
     root: &Path,
-    db_path: &Path,
+    opts: &Opts,
+    db_path: Option<&Path>,
     temp_path: Option<&Path>,
     conn: &Connection,
 ) -> Result<(
@@ -67,8 +83,12 @@ pub fn setup_pipeline_root_and_tuning(
 )> {
     let (root, db_canonical, temp_canonical) = canonicalize_paths(root, db_path, temp_path)?;
 
-    let (num_threads, drive_type, parallel_walk) =
-        determine_threads_for_drive(&root, conn, WorkerThreadLimits::current().all_threads);
+    let (num_threads, drive_type, parallel_walk) = determine_threads_for_drive(
+        &root,
+        conn,
+        WorkerThreadLimits::current().all_threads,
+        opts.num_threads,
+    );
 
     let writer_pool_size = setup_writer_pool_size(drive_type.is_network());
 
@@ -89,7 +109,7 @@ pub fn setup_pipeline_root_and_tuning(
 pub fn collect_entries(
     root: &Path,
     opts: &Opts,
-    db_path: &Path,
+    db_path: Option<&Path>,
     temp_path: Option<&Path>,
     conn: &Connection,
 ) -> Result<pipeline::CollectEntriesResult> {

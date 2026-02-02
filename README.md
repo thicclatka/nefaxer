@@ -13,48 +13,49 @@
 - **WAL** SQLite with batch inserts, optional in-memory index for small dirs (<10K files), writer pool
 - **Exclude patterns** (`-e`) for gitignore-like filtering
 - **Strict mode** (`--strict`): fail on first permission/access error instead of skipping
-- **Paranoid mode** (`--paranoid`, check only): re-hash when hash matches but mtime/size differ (collision check)
+- **Paranoid mode** (`--paranoid`, with `-c`): re-hash when hash matches but mtime/size differ (collision check)
 - **FD limit capping** (Unix): cap worker threads by `ulimit -n` to avoid EMFILE
 
 ## Usage
 
-### Commands
-
 ```bash
-# Index a directory (creates/updates .nefaxer in DIR)
-nefaxer index [OPTIONS] [DIR]
+# Index a directory (creates/updates .nefaxer in DIR). Default.
+nefaxer [OPTIONS] [DIR]
 
-# Compare directory to existing index; report added/removed/modified
-nefaxer check [OPTIONS] [DIR]
+# Compare to index and report added/removed/modified; do not write to the index
+nefaxer --dry-run [OPTIONS] [DIR]
 ```
 
-### Options (shared by `index` and `check`)
+### Options
 
-| Option                  | Short | Description                                                  |
-| ----------------------- | ----- | ------------------------------------------------------------ |
-| `--db <DB>`             | `-d`  | Path to index file. Default: `.nefaxer` in DIR               |
-| `--verbose`             | `-v`  | Verbose output and progress bar                              |
-| `--check-hash`          | `-c`  | Compute Blake3 hash for files (slower, more accurate diff)   |
-| `--follow-links`        | `-l`  | Follow symbolic links                                        |
-| `--mtime-window <SECS>` | `-m`  | Mtime tolerance in seconds (default: 0)                      |
-| `--exclude <PATTERN>`   | `-e`  | Exclude glob patterns (repeatable)                           |
-| `--strict`              |       | Fail on first permission/access error                        |
-| `--paranoid`            |       | (check only) Re-hash when hash matches but mtime/size differ |
+| Option                  | Short | Description                                                                                      |
+| ----------------------- | ----- | ------------------------------------------------------------------------------------------------ |
+| `--db <DB>`             | `-d`  | Path to index file. Default: `.nefaxer` in DIR                                                   |
+| `--dry-run`             |       | Compare only; report diff, do not update index                                                   |
+| `--list`                |       | List each changed path. If total changes > 100, write to `nefaxer.results` instead of stdout     |
+| `--verbose`             | `-v`  | Verbose output and progress bar                                                                  |
+| `--check-hash`          | `-c`  | Compute Blake3 hash for files (slower, more accurate diff)                                       |
+| `--follow-links`        | `-l`  | Follow symbolic links                                                                            |
+| `--mtime-window <SECS>` | `-m`  | Mtime tolerance in seconds (default: 0)                                                          |
+| `--exclude <PATTERN>`   | `-e`  | Exclude glob patterns (repeatable)                                                               |
+| `--encrypt`             | `-x`  | Encrypt the index database with SQLCipher. Prompts for passphrase (or use NEFAXER_DB_KEY / .env) |
+| `--strict`              |       | Fail on first permission/access error                                                            |
+| `--paranoid`            |       | (with -c) Re-hash when hash matches but mtime/size differ                                        |
 
 ### Examples
 
 ```bash
 # Index current dir, verbose
-nefaxer index -v
+nefaxer -v
 
 # Index with content hashing and exclude node_modules
-nefaxer index -c -e 'node_modules' -e '*.log'
+nefaxer -c -e 'node_modules' -e '*.log'
 
-# Check for changes, strict (no silent skips)
-nefaxer check --strict
+# Compare only (no index write), strict
+nefaxer --dry-run --strict
 
-# Check with paranoid re-hash for collision detection
-nefaxer check -c --paranoid
+# Compare with paranoid re-hash for collision detection
+nefaxer --dry-run -c --paranoid
 ```
 
 ## Database schema
@@ -83,9 +84,46 @@ cargo build --release
 
 ## Library
 
-Use the crate for programmatic indexing and diffing:
+Use the crate for programmatic indexing and diffing. The API returns a full current index (same shape as the `.nefaxer` DB).
 
-[ ] - Create better API for library access
+### Entry point
+
+- **`nefax_dir(root, opts)`** — Walk `root`, build and return the nefax map. Returns **`Result<Nefax>`** (path → metadata).
+
+### Result type
+
+```rust
+pub type Nefax = HashMap<PathBuf, PathMeta>;
+
+pub struct PathMeta {
+    pub mtime_ns: i64,
+    pub size: u64,
+    pub hash: Option<[u8; 32]>,
+}
+```
+
+Same shape as the `.nefaxer` DB. Diff against a previous nefax if you need added/removed/modified.
+
+### NefaxOpts
+
+Use `NefaxOpts::default()` and override as needed:
+
+- `num_threads` — override worker count (default: derived from drive)
+- `with_hash` — compute Blake3 for files
+- `follow_links` — follow symlinks
+- `mtime_window_ns` — mtime tolerance (nanoseconds)
+- `strict` — fail on first permission/access error
+- `paranoid` — re-hash when hash matches but mtime/size differ
+
+### Example
+
+```rust
+use nefaxer::{nefax_dir, NefaxOpts};
+use std::path::Path;
+
+let nefax = nefax_dir(Path::new("/some/dir"), &NefaxOpts::default())?;
+// nefax: HashMap<PathBuf, PathMeta>
+```
 
 ## License
 

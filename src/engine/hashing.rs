@@ -4,10 +4,13 @@ use anyhow::Result;
 use blake3::Hasher;
 use memmap2::Mmap;
 use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
+use std::collections::HashMap;
 use std::fs::File;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::Entry;
+use crate::Opts;
+use crate::engine::{StoredMeta, mtime_changed};
 use crate::utils::config::HashingConsts;
 use crate::utils::config::SMALL_FILE_THRESHOLD;
 
@@ -57,4 +60,34 @@ pub fn fill_hashes(entries: &mut [Entry], root: &Path) {
             }
         }
     });
+}
+
+/// When opts.with_hash and size >= threshold: reuse index hash if mtime+size match, else hash file.
+pub fn fill_entry_hash_if_needed(
+    entry: &mut Entry,
+    index: &HashMap<PathBuf, StoredMeta>,
+    root: &Path,
+    opts: &Opts,
+) {
+    if !opts.with_hash || entry.size < SMALL_FILE_THRESHOLD {
+        return;
+    }
+    let existing = index.get(&entry.path);
+    let reuse = existing.is_some_and(|(old_mtime, old_size, old_hash)| {
+        !mtime_changed(entry.mtime_ns, *old_mtime, opts.mtime_window_ns)
+            && entry.size == *old_size
+            && old_hash.as_ref().is_some_and(|v| v.len() == 32)
+    });
+    if reuse {
+        if let Some((_, _, Some(v))) = existing {
+            let mut arr = [0u8; 32];
+            arr.copy_from_slice(v);
+            entry.hash = Some(arr);
+        }
+    } else {
+        let abs = root.join(&entry.path);
+        if let Ok(Some(h)) = hash_file(&abs, entry.size) {
+            entry.hash = Some(h);
+        }
+    }
 }

@@ -96,10 +96,12 @@ fn detect_drive_type(path: &Path) -> DriveType {
 
 /// Returns (num_threads, drive_type, use_parallel_walk).
 /// use_parallel_walk: true for SSD and Network+SSD (jwalk), false for HDD and Network+HDD (walkdir).
+/// When `thread_override` is Some(n), use that instead of drive-derived count (still capped by FD limit).
 pub fn determine_threads_for_drive(
     path: &Path,
     conn: &Connection,
     available_threads: usize,
+    thread_override: Option<usize>,
 ) -> (usize, DriveType, bool) {
     let limits = WorkerThreadLimits::default();
     let drive_type = drive_type_for_path(path);
@@ -111,7 +113,8 @@ pub fn determine_threads_for_drive(
         DriveType::Unknown => (available_threads.min(limits.floor), false),
     };
 
-    let num_threads_to_use = determine_threads_given_fd_limit(num_threads);
+    let num_threads_to_use =
+        determine_threads_given_fd_limit(thread_override.unwrap_or(num_threads));
 
     if drive_type != DriveType::Network {
         debug!(

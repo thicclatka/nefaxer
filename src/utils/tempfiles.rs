@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::utils::config::PackagePaths;
@@ -57,4 +58,10 @@ pub fn prepare_index_work_path(db_path: &Path) -> Result<(PathBuf, bool)> {
         }
     }
     Ok((temp_path, use_temp))
+}
+
+pub fn rename_temp_to_final(temp_path: &Path, final_path: &Path) -> Result<()> {
+    fs::rename(temp_path, final_path).context("atomic rename temp index to final path")?;
+    remove_temp_wal_and_shm(temp_path);
+    Ok(())
 }

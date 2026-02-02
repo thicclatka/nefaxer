@@ -94,6 +94,48 @@ pub fn flush_progress_remainder(pb: Option<&Arc<Mutex<Bar>>>, total: usize, chun
     }
 }
 
+// Progress bar type alias
+pub type ProgressBar = Arc<std::sync::Mutex<Bar>>;
+
+/// (bar, on_batch, on_received) from setup_progress for streaming index.
+pub type ProgressSetup = (
+    Option<ProgressBar>,
+    Option<Box<dyn Fn(usize) + Send>>,
+    Option<Box<dyn Fn(usize) + Send>>,
+);
+
+/// Create a progress callback function that updates the progress bar.
+pub fn progress_callback(bar: &Option<ProgressBar>) -> Option<Box<dyn Fn(usize) + Send>> {
+    bar.as_ref().map(|bar| {
+        let bar = Arc::clone(bar);
+        Box::new(move |n: usize| update_progress_bar(&bar, n)) as Box<dyn Fn(usize) + Send>
+    })
+}
+
+/// Create a callback function that updates the progress bar on batch completion.
+pub fn on_batch_callback(
+    is_network_drive: bool,
+    bar: &Option<ProgressBar>,
+) -> Option<Box<dyn Fn(usize) + Send>> {
+    if is_network_drive {
+        None
+    } else {
+        progress_callback(bar)
+    }
+}
+
+/// Create a callback function that updates the progress bar on received completion.
+pub fn on_received_callback(
+    is_network_drive: bool,
+    bar: &Option<ProgressBar>,
+) -> Option<Box<dyn Fn(usize) + Send>> {
+    if is_network_drive {
+        progress_callback(bar)
+    } else {
+        None
+    }
+}
+
 /// Macro to execute a function and update progress bar
 /// Usage: `with_progress!(pb, function_call(...))`
 /// Optimized: only calls update_progress_bar if pb is Some

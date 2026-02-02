@@ -8,6 +8,7 @@ use std::thread::JoinHandle;
 
 use crate::Opts;
 use crate::pipeline::STREAMING_CHANNEL_CAP;
+use crate::utils::config::PackagePaths;
 
 /// Tuning derived from drive type and FD limit: worker count, writer pool size, walk mode.
 /// Filled by the engine from `determine_threads_for_drive` and `max_workers_by_fd_limit`.
@@ -74,11 +75,14 @@ pub fn create_pipeline_channels(
     let first_error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     let skipped_paths: Arc<Mutex<Vec<PathBuf>>> = Arc::new(Mutex::new(Vec::new()));
 
+    let mut exclude = PackagePaths::get().default_exclude_patterns();
+    exclude.extend(opts.exclude.iter().cloned());
+
     let ctx = PipelineContext {
         root: root.to_path_buf(),
         db_canonical: db_canonical.clone(),
         temp_canonical: temp_canonical.clone(),
-        exclude: opts.exclude.clone(),
+        exclude,
         strict: opts.strict,
         follow_links: opts.follow_links,
         first_error: Arc::clone(&first_error),

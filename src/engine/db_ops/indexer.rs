@@ -11,12 +11,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::Entry;
 use crate::engine::hashing::{hash_equals, hash_file};
 use crate::engine::tools::mtime_changed;
 use crate::utils::config::{DB_INSERT_BATCH_SIZE, SMALL_FILE_THRESHOLD};
+use crate::{Diff, Entry};
 
-use super::open::open_db;
+use super::connection::open_db;
 use super::{INSERT_PATH_SQL, StoredMeta};
 
 /// True if the entry is new or its mtime/size/hash differ from existing (within mtime_window_ns).
@@ -176,13 +176,15 @@ pub struct ApplyIndexDiffStreamingParams<'a> {
     pub with_hash: bool,
     /// When set, streaming checks this on each recv; if true, stops receiving, flushes batch, and returns (partial index).
     pub cancel_check: Option<Arc<AtomicBool>>,
+    /// When set, accumulate added/removed/modified for a summary after indexing (index must have existed).
+    pub diff: Option<&'a mut Diff>,
 }
 
 /// Write entries to DB as they are received (streaming). Tracks current paths for deletes at end.
 pub fn apply_index_diff_streaming(
     conn: &mut Connection,
     entry_rx: Receiver<Entry>,
-    params: ApplyIndexDiffStreamingParams<'_>,
+    params: &mut ApplyIndexDiffStreamingParams<'_>,
 ) -> Result<usize> {
     let mut current_paths = HashSet::new();
     let mut batch = Vec::with_capacity(DB_INSERT_BATCH_SIZE);
@@ -226,13 +228,34 @@ pub fn apply_index_diff_streaming(
             && entry.size >= SMALL_FILE_THRESHOLD
             && let Some(r) = params.root
         {
-            let abs = r.join(&entry.path);
-            if let Ok(Some(h)) = hash_file(&abs, entry.size) {
-                entry.hash = Some(h);
+            let existing_meta = params.existing.get(&entry.path);
+            let reuse_hash = existing_meta.is_some_and(|(old_mtime, old_size, old_hash)| {
+                !mtime_changed(entry.mtime_ns, *old_mtime, params.mtime_window_ns)
+                    && entry.size == *old_size
+                    && old_hash.as_ref().is_some_and(|v| v.len() == 32)
+            });
+            if reuse_hash {
+                if let Some((_, _, Some(v))) = existing_meta {
+                    let mut arr = [0u8; 32];
+                    arr.copy_from_slice(v);
+                    entry.hash = Some(arr);
+                }
+            } else {
+                let abs = r.join(&entry.path);
+                if let Ok(Some(h)) = hash_file(&abs, entry.size) {
+                    entry.hash = Some(h);
+                }
             }
         }
         current_paths.insert(entry.path.clone());
         if entry_needs_update(&entry, params.existing, params.mtime_window_ns) {
+            if let Some(diff) = params.diff.as_deref_mut() {
+                if params.existing.contains_key(&entry.path) {
+                    diff.modified.push(entry.path.clone());
+                } else {
+                    diff.added.push(entry.path.clone());
+                }
+            }
             batch.push(entry);
         }
         if batch.len() >= DB_INSERT_BATCH_SIZE {
@@ -253,6 +276,14 @@ pub fn apply_index_diff_streaming(
     }
 
     delete_removed_paths(conn, params.existing, &current_paths)?;
+
+    if let Some(diff) = params.diff.as_deref_mut() {
+        for path in params.existing.keys() {
+            if !current_paths.contains(path) {
+                diff.removed.push(path.clone());
+            }
+        }
+    }
 
     conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))
         .context("WAL checkpoint")?;

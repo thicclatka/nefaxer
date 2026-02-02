@@ -1,8 +1,13 @@
 //! Path and filter utilities
 
 use anyhow::{Context, Result};
+use log::{info, warn};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
+use crate::Diff;
+use crate::utils::Colors;
 use crate::utils::config::PackagePaths;
 
 /// Convert absolute path to relative path from base
@@ -160,11 +165,11 @@ pub fn check_root_and_canonicalize(path: &Path) -> Result<PathBuf> {
 
 pub fn canonicalize_paths(
     root: &Path,
-    db_path: &Path,
+    db_path: Option<&Path>,
     temp_path: Option<&Path>,
 ) -> Result<(PathBuf, Option<PathBuf>, Option<PathBuf>)> {
     let root = check_root_and_canonicalize(root)?;
-    let db_canonical = db_path.canonicalize().ok();
+    let db_canonical = db_path.and_then(|p| p.canonicalize().ok());
     let temp_canonical = temp_path.and_then(|p| p.canonicalize().ok());
     Ok((root, db_canonical, temp_canonical))
 }
@@ -178,4 +183,104 @@ pub fn temp_path_for(db_path: &Path) -> PathBuf {
         .parent()
         .unwrap_or(Path::new("."))
         .join(format!("{name}.tmp"))
+}
+
+macro_rules! write_diff_section {
+    ($out:expr, $paths:expr, $fmt:expr, $color:expr, $colorize:expr) => {
+        for p in $paths {
+            let line = format!($fmt, p.display());
+            let _ = writeln!(
+                $out,
+                "{}",
+                if $colorize {
+                    Colors::colorize($color, &line)
+                } else {
+                    line
+                }
+            );
+        }
+    };
+}
+
+/// Write diff path list to `out`. If `colorize` is true, prefix/lines use ANSI colors (for stdout).
+fn write_diff_paths<W: std::io::Write>(out: &mut W, diff: &Diff, colorize: bool) {
+    write_diff_section!(out, &diff.added, "+ {}", Colors::ADDED, colorize);
+    write_diff_section!(out, &diff.removed, "- {}", Colors::REMOVED, colorize);
+    write_diff_section!(out, &diff.modified, "M {}", Colors::MODIFIED, colorize);
+}
+
+/// Print diff summary (counts: Added / Removed / Modified). When list_paths is true, list each path
+/// to stdout if total <= LIST_THRESHOLD, otherwise write to output_dir / PackagePaths::results_filename().
+pub fn print_diff(diff: &Diff, dry_run: bool, list_paths: bool, output_dir: &Path) {
+    let msg = format!(
+        "Nefaxing {} results:",
+        if dry_run { "dry-run" } else { "index" }
+    );
+    info!("{}", msg);
+
+    let added_count = diff.added.len();
+    let removed_count = diff.removed.len();
+    let modified_count = diff.modified.len();
+    let total = added_count + removed_count + modified_count;
+
+    if total == 0 {
+        warn!("No changes detected.");
+        return;
+    }
+
+    info!(
+        "{} | {} | {}",
+        Colors::colorize(Colors::ADDED, &format!("Added: {}", added_count)),
+        Colors::colorize(Colors::REMOVED, &format!("Removed: {}", removed_count)),
+        Colors::colorize(Colors::MODIFIED, &format!("Modified: {}", modified_count))
+    );
+
+    if !list_paths {
+        return;
+    }
+
+    let threshold = crate::utils::config::LIST_THRESHOLD;
+    if total <= threshold {
+        let mut out = std::io::stdout().lock();
+        write_diff_paths(&mut out, diff, true);
+    } else {
+        let out_path = output_dir.join(PackagePaths::get().results_filename());
+        match std::fs::File::create(&out_path) {
+            Ok(mut f) => {
+                write_diff_paths(&mut f, diff, false);
+                info!("Listed {} changes to {}", total, out_path.display());
+            }
+            Err(e) => {
+                warn!("Could not write list to {}: {}", out_path.display(), e);
+            }
+        }
+    }
+}
+
+/// Create the database path from the root and db_path options.
+/// If db_path is None, use `root.join(<package index filename>)` (e.g. `.nefaxer`).
+pub fn create_db_path(root: &Path, db_path: Option<&Path>) -> PathBuf {
+    db_path
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| root.join(PackagePaths::get().output_filename()))
+}
+
+/// Setup Ctrl+C handler and return a shared boolean indicating if the user has requested cancellation.
+pub fn setup_ctrlc_handler() -> Result<Arc<AtomicBool>> {
+    let cancel_requested = Arc::new(AtomicBool::new(false));
+    let cancel_requested_handler = Arc::clone(&cancel_requested);
+
+    ctrlc::set_handler(move || {
+        cancel_requested_handler.store(true, Ordering::Relaxed);
+    })
+    .context("set Ctrl+C handler")?;
+    Ok(cancel_requested)
+}
+
+/// Return an error if the user requested cancellation (e.g. after indexing; partial index may have been flushed).
+pub fn check_for_cancel(cancel_requested: &Arc<AtomicBool>) -> Result<()> {
+    if cancel_requested.load(Ordering::Relaxed) {
+        anyhow::bail!("Nefaxing cancelled by user; partial index was flushed");
+    }
+    Ok(())
 }

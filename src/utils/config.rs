@@ -10,6 +10,7 @@ pub struct PackagePaths {
     pkg_name: &'static str,
     db_filename: String,
     probe_dir_name: String,
+    results_filename: String,
 }
 
 static PACKAGE_PATHS: OnceLock<PackagePaths> = OnceLock::new();
@@ -23,6 +24,7 @@ impl PackagePaths {
                 pkg_name: pkg,
                 db_filename: format!(".{pkg}"),
                 probe_dir_name: format!(".{pkg}_probe"),
+                results_filename: format!("{pkg}.results"),
             }
         })
     }
@@ -37,6 +39,19 @@ impl PackagePaths {
 
     pub fn probe_dir_name(&self) -> &str {
         &self.probe_dir_name
+    }
+
+    pub fn results_filename(&self) -> &str {
+        &self.results_filename
+    }
+
+    /// Filenames / dir names excluded from the walk by default. Does not include the index file
+    /// (output_filename); that is excluded via db_canonical in the walk.
+    pub fn default_exclude_patterns(&self) -> Vec<String> {
+        vec![
+            self.probe_dir_name().to_string(),
+            self.results_filename().to_string(),
+        ]
     }
 }
 
@@ -127,3 +142,8 @@ pub const WRITER_POOL_SIZE: usize = 4;
 
 /// When indexing fewer than this many files, use an in-memory DB then backup to disk (avoids WAL contention).
 pub const IN_MEMORY_INDEX_THRESHOLD: usize = 10_000;
+
+// ---- Diff / list output ----
+
+/// When --list is set, if total changes (added+removed+modified) exceed this, write paths to RESULTS_FILENAME instead of stdout.
+pub const LIST_THRESHOLD: usize = 100;
