@@ -39,7 +39,9 @@ pub fn prepare_index_work_path(db_path: &Path) -> Result<(PathBuf, bool)> {
             if e.kind() == std::io::ErrorKind::PermissionDenied {
                 use_temp = false;
             } else {
-                return Err(e).context("remove stale temp index");
+                return Err(e).with_context(|| {
+                    format!("remove stale temp index at {}", temp_path.display())
+                });
             }
         }
     }
@@ -61,7 +63,13 @@ pub fn prepare_index_work_path(db_path: &Path) -> Result<(PathBuf, bool)> {
 }
 
 pub fn rename_temp_to_final(temp_path: &Path, final_path: &Path) -> Result<()> {
-    fs::rename(temp_path, final_path).context("atomic rename temp index to final path")?;
+    fs::rename(temp_path, final_path).with_context(|| {
+        format!(
+            "atomic rename temp index to final path ({} -> {})",
+            temp_path.display(),
+            final_path.display()
+        )
+    })?;
     remove_temp_wal_and_shm(temp_path);
     Ok(())
 }

@@ -4,11 +4,11 @@ use rusqlite::Connection;
 use std::path::{Path, PathBuf};
 
 use crate::Opts;
-use crate::disk_detect::determine_threads_for_drive;
+use crate::disk_detect::{channel_cap_for_drive, determine_threads_for_drive};
 use crate::engine::parallel::parallel_walk_handler;
-use crate::engine::tools::canonicalize_paths;
+use crate::engine::{path_count_from_db, tools::canonicalize_paths};
 use crate::pipeline;
-use crate::utils::config::WorkerThreadLimits;
+use crate::utils::config::{StreamingChannelCap, WorkerThreadLimits};
 
 /// Start the walk + metadata pipeline. Returns receiver and handles; caller receives from
 /// `entry_rx` and must join `walk_handle` and `worker_handles` when done.
@@ -22,7 +22,13 @@ pub fn run_pipeline(
     let (root, db_canonical, temp_canonical, tuning) =
         setup_pipeline_root_and_tuning(root, opts, db_path, temp_path, conn)?;
 
-    let channels = pipeline::create_pipeline_channels(&root, &db_canonical, &temp_canonical, opts);
+    let channels = pipeline::create_pipeline_channels(
+        &root,
+        &db_canonical,
+        &temp_canonical,
+        opts,
+        tuning.channel_cap,
+    );
 
     let walk_handle = pipeline::spawn_walk_thread(
         channels.path_tx,
@@ -89,12 +95,25 @@ pub fn setup_pipeline_root_and_tuning(
         opts.num_threads,
     );
 
+    // Channel cap: if .nefaxer exists, get path count from DB (fast COUNT(*)); else drive-type default.
+    let stored_count = path_count_from_db(conn).filter(|&n| n > 0);
+    let channel_cap = stored_count
+        .map(|n| (n + StreamingChannelCap::MARGIN).min(StreamingChannelCap::MAX))
+        .unwrap_or_else(|| channel_cap_for_drive(drive_type));
+    log::debug!(
+        "Streaming cap set to {} ({})",
+        channel_cap,
+        stored_count
+            .map(|n| format!("{} paths from index", n))
+            .unwrap_or_else(|| format!("drive default {:?}", drive_type))
+    );
     parallel_walk_handler(parallel_walk);
 
     let tuning = pipeline::PipelineTuning {
         num_threads,
         parallel_walk,
         is_network_drive: drive_type.is_network(),
+        channel_cap,
     };
     Ok((root, db_canonical, temp_canonical, tuning))
 }

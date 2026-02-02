@@ -3,7 +3,6 @@
 use anyhow::Result;
 use blake3::Hasher;
 use memmap2::Mmap;
-use rayon::iter::{IntoParallelRefMutIterator, ParallelIterator};
 use std::collections::HashMap;
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -48,18 +47,6 @@ pub fn hash_equals(hash1: &Option<[u8; 32]>, hash2: &Option<Vec<u8>>) -> bool {
         (Some(a), Some(b)) => a.as_slice() == b.as_slice(),
         _ => false,
     }
-}
-
-/// Fill hashes for entries that need them (size >= SMALL_FILE_THRESHOLD). Call after collect_entries when opts.with_hash.
-pub fn fill_hashes(entries: &mut [Entry], root: &Path) {
-    entries.par_iter_mut().for_each(|entry| {
-        if entry.size >= SMALL_FILE_THRESHOLD {
-            let abs = root.join(&entry.path);
-            if let Ok(Some(h)) = hash_file(&abs, entry.size) {
-                entry.hash = Some(h);
-            }
-        }
-    });
 }
 
 /// When opts.with_hash and size >= threshold: reuse index hash if mtime+size match, else hash file.

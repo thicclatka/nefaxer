@@ -137,6 +137,26 @@ pub const SMALL_FILE_THRESHOLD: u64 = 4 * 1024; // 4 KB
 /// Batch size for DB insert/update chunks (balance transaction size vs round-trips).
 pub const DB_INSERT_BATCH_SIZE: usize = 1000;
 
+// ---- Streaming channel cap ----
+
+/// Channel cap (path + entry) tuned by drive type; after first run, finetuned from stored path count in diskinfo.
+pub struct StreamingChannelCap;
+
+impl StreamingChannelCap {
+    /// Default cap when no stored path count (SSD: walk fast, let it run ahead).
+    pub const DEFAULT_SSD: usize = 500_000;
+    /// HDD: walk is serial and slower; smaller buffer is enough.
+    pub const DEFAULT_HDD: usize = 100_000;
+    /// Network: conservative.
+    pub const DEFAULT_NETWORK: usize = 200_000;
+    /// Unknown drive: conservative (matches previous fixed default).
+    pub const DEFAULT_UNKNOWN: usize = 50_000;
+    /// Upper bound when using stored path count (avoid huge allocation).
+    pub const MAX: usize = 1_000_000;
+    /// Margin added to stored path count when finetuning (e.g. tree grew slightly).
+    pub const MARGIN: usize = 10_000;
+}
+
 // ---- Diff / list output ----
 
 /// When --list is set, if total changes (added+removed+modified) exceed this, write paths to RESULTS_FILENAME instead of stdout.

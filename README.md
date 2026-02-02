@@ -42,6 +42,24 @@ nefaxer --dry-run [OPTIONS] [DIR]
 | `--strict`              |       | Fail on first permission/access error                                                            |
 | `--paranoid`            |       | (with -c) Re-hash when hash matches but mtime/size differ                                        |
 
+### Configuration file (CLI only)
+
+When running the binary, you can put a `.nefaxer.toml` in the directory you index. Options from the file are used as defaults; command-line options override them.
+
+```toml
+[index]
+db_path = ".nefaxer"
+hash = true
+follow_links = false
+exclude = ["node_modules", ".git"]
+list = false
+verbose = false
+mtime_window = 0
+strict = false
+paranoid = false
+encrypt = false
+```
+
 ### Examples
 
 ```bash
@@ -76,12 +94,6 @@ CREATE TABLE diskinfo (
 );
 ```
 
-## Build
-
-```bash
-cargo build --release
-```
-
 ## Library
 
 Use the crate for programmatic indexing and diffing. The API returns a full current index (same shape as the `.nefaxer` DB).
@@ -111,6 +123,7 @@ Use `NefaxOpts::default()` and override as needed:
 - `num_threads` — override worker count (default: derived from drive)
 - `with_hash` — compute Blake3 for files
 - `follow_links` — follow symlinks
+- `exclude` — glob patterns to skip (e.g. `node_modules`, `*.log`)
 - `mtime_window_ns` — mtime tolerance (nanoseconds)
 - `strict` — fail on first permission/access error
 - `paranoid` — re-hash when hash matches but mtime/size differ

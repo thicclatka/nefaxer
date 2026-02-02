@@ -15,6 +15,11 @@ pub fn path_relative_to(path: &Path, base: &Path) -> Option<PathBuf> {
     path.strip_prefix(base).ok().map(|p| p.to_path_buf())
 }
 
+/// Normalize path for DB storage: forward slashes only. Makes DB portable across Windows/Unix.
+pub fn path_to_db_string(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
 /// Check if a file should be excluded based on OS-specific hidden files
 pub fn is_os_hidden_file(path: &Path) -> bool {
     if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
@@ -158,7 +163,9 @@ pub fn running_as_root() -> bool {
 }
 
 pub fn check_root_and_canonicalize(path: &Path) -> Result<PathBuf> {
-    let path = path.canonicalize().context("canonicalize path")?;
+    let path = path
+        .canonicalize()
+        .with_context(|| format!("canonicalize path {}", path.display()))?;
     check_for_root(&path)?;
     Ok(path)
 }
@@ -172,17 +179,6 @@ pub fn canonicalize_paths(
     let db_canonical = db_path.and_then(|p| p.canonicalize().ok());
     let temp_canonical = temp_path.and_then(|p| p.canonicalize().ok());
     Ok((root, db_canonical, temp_canonical))
-}
-
-pub fn temp_path_for(db_path: &Path) -> PathBuf {
-    let name = db_path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or_else(|| PackagePaths::get().output_filename());
-    db_path
-        .parent()
-        .unwrap_or(Path::new("."))
-        .join(format!("{name}.tmp"))
 }
 
 macro_rules! write_diff_section {

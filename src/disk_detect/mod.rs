@@ -94,6 +94,17 @@ fn detect_drive_type(path: &Path) -> DriveType {
     }
 }
 
+/// Channel cap for path/entry channels by drive type (used when no stored path count in diskinfo).
+pub fn channel_cap_for_drive(drive_type: DriveType) -> usize {
+    use crate::utils::config::StreamingChannelCap;
+    match drive_type {
+        DriveType::SSD => StreamingChannelCap::DEFAULT_SSD,
+        DriveType::HDD => StreamingChannelCap::DEFAULT_HDD,
+        DriveType::Network => StreamingChannelCap::DEFAULT_NETWORK,
+        DriveType::Unknown => StreamingChannelCap::DEFAULT_UNKNOWN,
+    }
+}
+
 /// Returns (num_threads, drive_type, use_parallel_walk).
 /// use_parallel_walk: true for SSD and Network+SSD (jwalk), false for HDD and Network+HDD (walkdir).
 /// When `thread_override` is Some(n), use that instead of drive-derived count (still capped by FD limit).

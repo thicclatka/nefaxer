@@ -50,6 +50,8 @@ pub struct NefaxOpts {
     pub with_hash: bool,
     /// Follow symbolic links.
     pub follow_links: bool,
+    /// Exclude patterns (glob syntax, e.g. `node_modules`, `*.log`).
+    pub exclude: Vec<String>,
     /// Mtime tolerance window in nanoseconds.
     pub mtime_window_ns: i64,
     /// Strict mode: fail on first permission/access error instead of skipping.
@@ -65,7 +67,7 @@ impl From<&NefaxOpts> for Opts {
             num_threads: o.num_threads,
             with_hash: o.with_hash,
             follow_links: o.follow_links,
-            exclude: vec![],
+            exclude: o.exclude.clone(),
             verbose: false,
             mtime_window_ns: o.mtime_window_ns,
             strict: o.strict,

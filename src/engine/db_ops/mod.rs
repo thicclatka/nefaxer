@@ -3,8 +3,10 @@
 mod connection;
 mod indexer;
 
-pub use connection::{load_index, open_db, open_db_in_memory, open_db_or_detect_encrypted};
-pub use indexer::{ApplyIndexDiffStreamingParams, apply_index_diff_streaming};
+pub use connection::{
+    load_index, open_db, open_db_in_memory, open_db_or_detect_encrypted, path_count_from_db,
+};
+pub use indexer::{ApplyIndexDiffStreamingParams, apply_index_diff_streaming, entry_needs_update};
 
 /// Stored row: (mtime_ns, size, hash).
 pub type StoredMeta = (i64, u64, Option<Vec<u8>>);

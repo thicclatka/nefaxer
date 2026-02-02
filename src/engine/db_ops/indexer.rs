@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use crate::engine::hashing::{hash_equals, hash_file};
-use crate::engine::tools::mtime_changed;
+use crate::engine::tools::{mtime_changed, path_to_db_string};
 use crate::utils::config::{DB_INSERT_BATCH_SIZE, SMALL_FILE_THRESHOLD};
 use crate::{Diff, Entry};
 
@@ -43,7 +43,7 @@ fn delete_removed_paths(
         .context("prepare delete")?;
     for old_path in existing.keys() {
         if !current_paths.contains(old_path) {
-            stmt.execute([old_path.to_string_lossy().as_ref()])
+            stmt.execute([path_to_db_string(old_path).as_str()])
                 .context("delete path")?;
         }
     }
@@ -53,7 +53,7 @@ fn delete_removed_paths(
 /// Execute one path insert for an entry (used by flush_batch).
 fn execute_insert_entry(stmt: &mut Statement<'_>, e: &Entry) -> Result<()> {
     stmt.execute((
-        e.path.to_string_lossy().as_ref(),
+        path_to_db_string(&e.path).as_str(),
         e.mtime_ns,
         e.size as i64,
         e.hash.as_ref().map(|h| h.as_slice()),
@@ -94,6 +94,8 @@ pub struct ApplyIndexDiffStreamingParams<'a> {
     pub cancel_check: Option<Arc<AtomicBool>>,
     /// When set, accumulate added/removed/modified for a summary after indexing (index must have existed).
     pub diff: Option<&'a mut Diff>,
+    /// When set, build the current index map incrementally (path → StoredMeta) so caller gets it without a second load_index.
+    pub result_map: Option<&'a mut HashMap<PathBuf, StoredMeta>>,
 }
 
 /// Write entries to DB as they are received (streaming). Tracks current paths for deletes at end.
@@ -164,6 +166,15 @@ pub fn apply_index_diff_streaming(
             }
         }
         current_paths.insert(entry.path.clone());
+        if let Some(ref mut map) = params.result_map {
+            let hash = entry.hash.map(|a| a.to_vec()).or_else(|| {
+                params
+                    .existing
+                    .get(&entry.path)
+                    .and_then(|(_, _, h)| h.clone())
+            });
+            map.insert(entry.path.clone(), (entry.mtime_ns, entry.size, hash));
+        }
         if entry_needs_update(&entry, params.existing, params.mtime_window_ns) {
             if let Some(diff) = params.diff.as_deref_mut() {
                 if params.existing.contains_key(&entry.path) {

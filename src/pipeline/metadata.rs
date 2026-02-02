@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::thread::{self, JoinHandle};
 
 use crate::engine::hashing::hash_file;
-use crate::engine::tools::path_relative_to;
+use crate::engine::tools::{path_relative_to, path_to_db_string};
 use crate::utils::config::SMALL_FILE_THRESHOLD;
 
 /// Single metadata worker: read paths from path_rx, turn into entries, send on entry_tx.
@@ -47,13 +47,14 @@ fn path_to_entry(abs_path: &Path, root: &Path, with_hash: bool) -> Result<Entry>
     let size = meta.len();
     let is_file = meta.is_file();
     let rel = path_relative_to(abs_path, root).unwrap_or_else(|| abs_path.to_path_buf());
+    let path = PathBuf::from(path_to_db_string(&rel));
     let hash = if with_hash && is_file && size >= SMALL_FILE_THRESHOLD {
         hash_file(abs_path, size)?
     } else {
         None
     };
     Ok(Entry {
-        path: rel,
+        path,
         mtime_ns,
         size,
         hash,

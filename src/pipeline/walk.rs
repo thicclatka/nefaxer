@@ -70,26 +70,33 @@ pub fn spawn_walk_thread(
             true => jwalk_iter(&ctx),
             false => walkdir_iter(&ctx),
         };
-        run_walk_loop(path_tx, path_count_tx, ctx, iter)
+        run_walk_loop(path_tx, path_count_tx, ctx, iter, !parallel_walk)
     })
 }
 
 /// Run the common walk loop: consume `iter` of [`WalkOutcome`], filter with `should_include_in_walk`,
 /// send included paths to `path_tx`, handle errors (strict → set first_error and break; else log and push to skipped_paths).
 /// Sends total count on `path_count_tx` and drops `path_tx` when done. Returns the count of paths sent.
+/// When `track_last_path` is true (walkdir/serial), we record the last path seen and use it when an error has no path.
+/// When false (jwalk/parallel), we don't track—avoids cloning on every Ok and "last path" would be nondeterministic anyway.
 pub fn run_walk_loop<I>(
     path_tx: Sender<PathBuf>,
     path_count_tx: Sender<usize>,
     ctx: PipelineContext,
     iter: I,
+    track_last_path: bool,
 ) -> usize
 where
     I: Iterator<Item = WalkOutcome>,
 {
     let mut count = 0_usize;
+    let mut last_path: Option<PathBuf> = None;
     for outcome in iter {
         match outcome {
             WalkOutcome::Ok(path) => {
+                if track_last_path {
+                    last_path = Some(path.clone());
+                }
                 if should_include_in_walk(
                     &path,
                     &ctx.root,
@@ -108,10 +115,17 @@ where
                     let _ = ctx.first_error.lock().unwrap().get_or_insert_with(|| msg);
                     break;
                 }
-                log::warn!("Permission denied or error accessing path: {}", msg);
-                if let Some(p) = path {
-                    ctx.skipped_paths.lock().unwrap().push(p);
-                }
+                // Record every error (path or synthetic line so timeouts/errors with no path are counted).
+                let to_push = path.unwrap_or_else(|| {
+                    PathBuf::from(format!(
+                        "<no-path, last was {}>",
+                        last_path
+                            .as_ref()
+                            .map(|p| p.display().to_string())
+                            .unwrap_or_else(|| "<none>".to_string())
+                    ))
+                });
+                ctx.skipped_paths.lock().unwrap().push((to_push, msg));
             }
         }
     }

@@ -7,16 +7,17 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
 use crate::Opts;
-use crate::pipeline::STREAMING_CHANNEL_CAP;
 use crate::utils::config::PackagePaths;
 
-/// Tuning derived from drive type and FD limit: worker count, walk mode.
-/// Filled by the engine from `determine_threads_for_drive` and `max_workers_by_fd_limit`.
+/// Tuning derived from drive type and FD limit: worker count, walk mode, channel cap.
+/// Channel cap is drive-type default on first run; finetuned from stored path count in diskinfo on subsequent runs.
 #[derive(Clone, Debug)]
 pub struct PipelineTuning {
     pub num_threads: usize,
     pub parallel_walk: bool,
     pub is_network_drive: bool,
+    /// Capacity for path and entry channels (drive-type default or from diskinfo path count).
+    pub channel_cap: usize,
 }
 
 /// Shared context for the walk + metadata pipeline. Built in `run_pipeline` and passed
@@ -29,7 +30,7 @@ pub struct PipelineContext {
     pub strict: bool,
     pub follow_links: bool,
     pub first_error: Arc<Mutex<Option<String>>>,
-    pub skipped_paths: Arc<Mutex<Vec<PathBuf>>>,
+    pub skipped_paths: Arc<Mutex<Vec<(PathBuf, String)>>>,
 }
 
 /// Result of [`collect_entries`]: (entries, path_count).
@@ -45,7 +46,7 @@ pub struct PipelineHandles {
     pub worker_handles: Vec<JoinHandle<()>>,
     pub is_network_drive: bool,
     pub first_error: Arc<Mutex<Option<String>>>,
-    pub skipped_paths: Arc<Mutex<Vec<PathBuf>>>,
+    pub skipped_paths: Arc<Mutex<Vec<(PathBuf, String)>>>,
 }
 
 /// Channels and shared state for the pipeline. Walk thread gets path_tx, path_count_tx, ctx; workers get path_rx, entry_tx.
@@ -57,7 +58,7 @@ pub struct PipelineChannels {
     pub path_count_tx: Sender<usize>,
     pub path_count_rx: Receiver<usize>,
     pub first_error: Arc<Mutex<Option<String>>>,
-    pub skipped_paths: Arc<Mutex<Vec<PathBuf>>>,
+    pub skipped_paths: Arc<Mutex<Vec<(PathBuf, String)>>>,
     pub ctx: PipelineContext,
 }
 
@@ -66,12 +67,13 @@ pub fn create_pipeline_channels(
     db_canonical: &Option<PathBuf>,
     temp_canonical: &Option<PathBuf>,
     opts: &Opts,
+    channel_cap: usize,
 ) -> PipelineChannels {
-    let (path_tx, path_rx) = bounded::<PathBuf>(STREAMING_CHANNEL_CAP);
-    let (entry_tx, entry_rx) = bounded::<Entry>(STREAMING_CHANNEL_CAP);
+    let (path_tx, path_rx) = bounded::<PathBuf>(channel_cap);
+    let (entry_tx, entry_rx) = bounded::<Entry>(channel_cap);
     let (path_count_tx, path_count_rx) = bounded::<usize>(1);
     let first_error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-    let skipped_paths: Arc<Mutex<Vec<PathBuf>>> = Arc::new(Mutex::new(Vec::new()));
+    let skipped_paths: Arc<Mutex<Vec<(PathBuf, String)>>> = Arc::new(Mutex::new(Vec::new()));
 
     let mut exclude = PackagePaths::get().default_exclude_patterns();
     exclude.extend(opts.exclude.iter().cloned());

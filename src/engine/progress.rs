@@ -1,7 +1,6 @@
 //! Progress bar utilities for displaying processing status
 
 use kdam::{Animation, Bar, BarExt};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// Update the bar's total (e.g. during streaming when total grows). Refreshes the display.
@@ -64,33 +63,6 @@ pub fn update_progress_bar(pb: &Arc<Mutex<Bar>>, n: usize) {
     // If lock is contended, skip update (progress bar will catch up on next update)
     if let Ok(mut pb) = pb.try_lock() {
         let _ = pb.update(n);
-    }
-}
-
-/// Increment a shared counter and update the progress bar every `chunk_size` items.
-/// Call from parallel workers to reduce lock contention while still updating progress.
-pub fn report_progress_batched(
-    pb: Option<&Arc<Mutex<Bar>>>,
-    counter: &AtomicUsize,
-    chunk_size: usize,
-) {
-    let count = counter.fetch_add(1, Ordering::Relaxed);
-    if let Some(pb) = pb {
-        // Update when we've just completed a full chunk (count is 0-based before this item)
-        if count > 0 && (count + 1).is_multiple_of(chunk_size) {
-            update_progress_bar(pb, chunk_size);
-        }
-    }
-}
-
-/// Final progress update for the remainder after batched updates.
-/// Call once after the parallel loop with the same `total` and `chunk_size`.
-pub fn flush_progress_remainder(pb: Option<&Arc<Mutex<Bar>>>, total: usize, chunk_size: usize) {
-    if let Some(pb) = pb {
-        let remaining = total % chunk_size;
-        if remaining > 0 {
-            update_progress_bar(pb, remaining);
-        }
     }
 }
 

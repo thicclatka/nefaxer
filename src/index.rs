@@ -156,6 +156,7 @@ pub(crate) fn nefax_dir_with_opts(root: &Path, opts: &Opts) -> Result<crate::Nef
         with_hash: opts.with_hash,
         cancel_check: Some(Arc::clone(&cancel_requested)),
         diff: (!existing.is_empty()).then_some(&mut index_diff),
+        result_map: None, // CLI does not need the full index; lib uses write_to_db=false and diff_from_stream.
     };
 
     let written = engine::apply_index_diff_streaming(&mut conn, entry_rx, &mut stream_params)?;
@@ -180,28 +181,6 @@ pub(crate) fn nefax_dir_with_opts(root: &Path, opts: &Opts) -> Result<crate::Nef
         info!("New nefaxer index created.");
     }
 
-    // Load current index from DB (same shape as lib result) and convert to PathMeta.
-    let stored = engine::load_index(&conn)?;
-    let index_map: std::collections::HashMap<std::path::PathBuf, crate::PathMeta> = stored
-        .into_iter()
-        .map(|(path, (mtime_ns, size, hash))| {
-            let hash = hash.and_then(|v| {
-                (v.len() == 32).then(|| {
-                    let mut a = [0u8; 32];
-                    a.copy_from_slice(&v);
-                    a
-                })
-            });
-            (
-                path,
-                crate::PathMeta {
-                    mtime_ns,
-                    size,
-                    hash,
-                },
-            )
-        })
-        .collect();
-
-    Ok(index_map)
+    // CLI does not need the full index as return value; diff was built during streaming. Return empty.
+    Ok(std::collections::HashMap::new())
 }

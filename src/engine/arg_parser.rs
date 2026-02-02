@@ -27,40 +27,40 @@ pub struct Cli {
     pub dry_run: bool,
 
     /// List each changed path. If total changes exceed threshold, write to nefaxer.results instead of stdout.
-    #[arg(long, short = 'l')]
-    pub list: bool,
+    #[arg(long, short = 'l', num_args = 0..=1, default_missing_value = "true", value_parser = clap::value_parser!(bool))]
+    pub list: Option<bool>,
 
-    /// Verbose output. Default: false.
-    #[arg(long, short = 'v')]
-    pub verbose: bool,
+    /// Verbose output.
+    #[arg(long, short = 'v', num_args = 0..=1, default_missing_value = "true", value_parser = clap::value_parser!(bool))]
+    pub verbose: Option<bool>,
 
-    /// Compute blake3 hash for files (slower but more accurate). Default: false.
-    #[arg(long, short = 'c')]
-    pub check_hash: bool,
+    /// Compute blake3 hash for files (slower but more accurate).
+    #[arg(long, short = 'c', num_args = 0..=1, default_missing_value = "true", value_parser = clap::value_parser!(bool))]
+    pub check_hash: Option<bool>,
 
-    /// Follow symbolic links. Default: false.
-    #[arg(long, short = 'f')]
-    pub follow_links: bool,
+    /// Follow symbolic links.
+    #[arg(long, short = 'f', num_args = 0..=1, default_missing_value = "true", value_parser = clap::value_parser!(bool))]
+    pub follow_links: Option<bool>,
 
-    /// Mtime tolerance window in seconds. Files within this window are considered unchanged. Default: 0 (exact match).
-    #[arg(long, short = 'm', default_value = "0")]
-    pub mtime_window: i64,
+    /// Mtime tolerance window in seconds. Files within this window are considered unchanged.
+    #[arg(long, short = 'm', value_parser = clap::value_parser!(i64))]
+    pub mtime_window: Option<i64>,
 
     /// Exclude patterns (glob syntax). Can specify multiple: -e pattern1 pattern2 pattern3
     #[arg(long, short = 'e', num_args = 1..)]
     pub exclude: Vec<String>,
 
-    /// Strict mode: fail on first permission error instead of skipping. Default: false.
-    #[arg(long)]
-    pub strict: bool,
+    /// Strict mode: fail on first permission error instead of skipping.
+    #[arg(long, num_args = 0..=1, default_missing_value = "true", value_parser = clap::value_parser!(bool))]
+    pub strict: Option<bool>,
 
-    /// Paranoid mode: re-hash files when hash matches but mtime/size differ (detect collisions). Default: false.
-    #[arg(long)]
-    pub paranoid: bool,
+    /// Paranoid mode: re-hash files when hash matches but mtime/size differ (detect collisions).
+    #[arg(long, num_args = 0..=1, default_missing_value = "true", value_parser = clap::value_parser!(bool))]
+    pub paranoid: Option<bool>,
 
     /// Encrypt the index database with SQLCipher. Prompts for passphrase (or use NEFAXER_DB_KEY / .env).
-    #[arg(long, short = 'x')]
-    pub encrypt: bool,
+    #[arg(long, short = 'x', num_args = 0..=1, default_missing_value = "true", value_parser = clap::value_parser!(bool))]
+    pub encrypt: Option<bool>,
 }
 
 impl Cli {

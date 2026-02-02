@@ -1,6 +1,7 @@
 pub mod config;
 pub mod fd_limit;
 pub mod logger;
+pub mod nefaxer_toml;
 pub mod passphrase;
 pub mod tempfiles;
 
