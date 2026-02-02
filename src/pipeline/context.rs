@@ -10,12 +10,11 @@ use crate::Opts;
 use crate::pipeline::STREAMING_CHANNEL_CAP;
 use crate::utils::config::PackagePaths;
 
-/// Tuning derived from drive type and FD limit: worker count, writer pool size, walk mode.
+/// Tuning derived from drive type and FD limit: worker count, walk mode.
 /// Filled by the engine from `determine_threads_for_drive` and `max_workers_by_fd_limit`.
 #[derive(Clone, Debug)]
 pub struct PipelineTuning {
     pub num_threads: usize,
-    pub writer_pool_size: usize,
     pub parallel_walk: bool,
     pub is_network_drive: bool,
 }
@@ -33,8 +32,8 @@ pub struct PipelineContext {
     pub skipped_paths: Arc<Mutex<Vec<PathBuf>>>,
 }
 
-/// Result of [`collect_entries`]: (entries, writer_pool_size, path_count).
-pub type CollectEntriesResult = (Vec<Entry>, usize, usize);
+/// Result of [`collect_entries`]: (entries, path_count).
+pub type CollectEntriesResult = (Vec<Entry>, usize);
 
 /// Handles returned by [`run_pipeline`] for streaming: receive entries and join when done.
 /// `path_count_rx`: receives the walk's path count when the walk finishes (use to set progress bar total).
@@ -44,7 +43,6 @@ pub struct PipelineHandles {
     pub path_count_rx: Receiver<usize>,
     pub walk_handle: JoinHandle<usize>,
     pub worker_handles: Vec<JoinHandle<()>>,
-    pub writer_pool_size: usize,
     pub is_network_drive: bool,
     pub first_error: Arc<Mutex<Option<String>>>,
     pub skipped_paths: Arc<Mutex<Vec<PathBuf>>>,

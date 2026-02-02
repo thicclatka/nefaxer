@@ -137,12 +137,6 @@ pub const SMALL_FILE_THRESHOLD: u64 = 4 * 1024; // 4 KB
 /// Batch size for DB insert/update chunks (balance transaction size vs round-trips).
 pub const DB_INSERT_BATCH_SIZE: usize = 1000;
 
-/// Number of writer connections for WAL; each writes a partition to reduce lock hold time.
-pub const WRITER_POOL_SIZE: usize = 4;
-
-/// When indexing fewer than this many files, use an in-memory DB then backup to disk (avoids WAL contention).
-pub const IN_MEMORY_INDEX_THRESHOLD: usize = 10_000;
-
 // ---- Diff / list output ----
 
 /// When --list is set, if total changes (added+removed+modified) exceed this, write paths to RESULTS_FILENAME instead of stdout.

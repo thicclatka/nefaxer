@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::Opts;
 use crate::disk_detect::determine_threads_for_drive;
-use crate::engine::parallel::{parallel_walk_handler, setup_writer_pool_size};
+use crate::engine::parallel::parallel_walk_handler;
 use crate::engine::tools::canonicalize_paths;
 use crate::pipeline;
 use crate::utils::config::WorkerThreadLimits;
@@ -46,7 +46,6 @@ pub fn run_pipeline(
         path_count_rx: channels.path_count_rx,
         walk_handle,
         worker_handles,
-        writer_pool_size: tuning.writer_pool_size,
         is_network_drive: tuning.is_network_drive,
         first_error: channels.first_error,
         skipped_paths: channels.skipped_paths,
@@ -68,7 +67,7 @@ pub fn shutdown_pipeline_handles(
     Ok(())
 }
 
-/// Canonicalize root and paths, detect drive type, compute thread count and writer pool size.
+/// Canonicalize root and paths, detect drive type, compute thread count.
 pub fn setup_pipeline_root_and_tuning(
     root: &Path,
     opts: &Opts,
@@ -90,13 +89,10 @@ pub fn setup_pipeline_root_and_tuning(
         opts.num_threads,
     );
 
-    let writer_pool_size = setup_writer_pool_size(drive_type.is_network());
-
     parallel_walk_handler(parallel_walk);
 
     let tuning = pipeline::PipelineTuning {
         num_threads,
-        writer_pool_size,
         parallel_walk,
         is_network_drive: drive_type.is_network(),
     };
@@ -104,7 +100,7 @@ pub fn setup_pipeline_root_and_tuning(
 }
 
 /// Main orchestrator: Collect all entries under `root` via streaming pipeline.
-/// Returns (entries, writer_pool_size, path_count). No progress bar here so kdam never blocks the pipeline; caller may create one for Phase 3 using path_count.
+/// Returns (entries, path_count). No progress bar here so kdam never blocks the pipeline; caller may create one for Phase 3 using path_count.
 /// Walk → path channel → workers (metadata) → entry channel → Vec.
 pub fn collect_entries(
     root: &Path,
@@ -118,7 +114,6 @@ pub fn collect_entries(
         path_count_rx: _path_count_rx,
         walk_handle,
         worker_handles,
-        writer_pool_size,
         is_network_drive: _,
         first_error,
         skipped_paths,
@@ -142,5 +137,5 @@ pub fn collect_entries(
 
     pipeline::check_for_initial_error_or_skipped_paths(opts, &first_error, &skipped_paths)?;
 
-    Ok((entries, writer_pool_size, path_count))
+    Ok((entries, path_count))
 }

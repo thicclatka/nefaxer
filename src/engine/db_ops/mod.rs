@@ -1,15 +1,10 @@
-//! Database operations: schema, open/backup/load, index diff (batch, streaming, pooled).
+//! Database operations: schema, open/backup/load, index diff (streaming).
 
 mod connection;
 mod indexer;
 
-pub use connection::{
-    backup_to_file, load_index, open_db, open_db_in_memory, open_db_or_detect_encrypted,
-};
-pub use indexer::{
-    ApplyIndexDiffPooledParams, ApplyIndexDiffStreamingParams, apply_index_diff,
-    apply_index_diff_pooled, apply_index_diff_streaming,
-};
+pub use connection::{load_index, open_db, open_db_in_memory, open_db_or_detect_encrypted};
+pub use indexer::{ApplyIndexDiffStreamingParams, apply_index_diff_streaming};
 
 /// Stored row: (mtime_ns, size, hash).
 pub type StoredMeta = (i64, u64, Option<Vec<u8>>);

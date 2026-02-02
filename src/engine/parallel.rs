@@ -3,7 +3,6 @@
 use log::debug;
 
 pub use crate::utils::config::ProgressConsts;
-pub use crate::utils::config::WRITER_POOL_SIZE;
 
 /// Compute chunk size for batched progress updates in a parallel loop.
 ///
@@ -15,16 +14,6 @@ pub fn adaptive_progress_chunk_size(
     target_updates: usize,
 ) -> usize {
     (total_items / (num_workers * target_updates)).max(ProgressConsts::ADAPTIVE_CHUNK_MIN)
-}
-
-pub fn setup_writer_pool_size(is_network_drive: bool) -> usize {
-    let writer_pool_size = if is_network_drive {
-        1
-    } else {
-        WRITER_POOL_SIZE
-    };
-    debug!("Writer pool size: {}", writer_pool_size);
-    writer_pool_size
 }
 
 pub fn parallel_walk_handler(parallel_walk: bool) {

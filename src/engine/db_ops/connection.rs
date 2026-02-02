@@ -2,10 +2,8 @@
 
 use anyhow::{Context, Result};
 use rusqlite::Connection;
-use rusqlite::backup::Backup;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use crate::utils::get_passphrase;
 
@@ -56,26 +54,6 @@ pub fn open_db_in_memory() -> Result<Connection> {
     let conn = Connection::open_in_memory().context("open in-memory database")?;
     conn.execute_batch(SCHEMA).context("create schema")?;
     Ok(conn)
-}
-
-/// Copy the source database (e.g. in-memory) to a file. Destination is overwritten.
-/// If `passphrase` is Some, the backup file is encrypted with SQLCipher using that key.
-pub fn backup_to_file(source: &Connection, path: &Path, passphrase: Option<&str>) -> Result<()> {
-    let mut dest = Connection::open(path).context("open destination database for backup")?;
-    if let Some(key) = passphrase {
-        dest.pragma_update(None, "key", key)
-            .context("set SQLCipher key on destination")?;
-    }
-    {
-        let backup = Backup::new(source, &mut dest).context("create backup")?;
-        backup
-            .run_to_completion(100, Duration::from_millis(0), None)
-            .context("run backup to completion")?;
-    }
-    let wal_with_mode = format!("PRAGMA journal_mode = WAL;{}", WAL_PRAGMAS);
-    dest.execute_batch(&wal_with_mode)
-        .context("set WAL pragmas on destination")?;
-    Ok(())
 }
 
 /// Load existing index from DB into a map: path -> (mtime_ns, size, hash).

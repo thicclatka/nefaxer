@@ -1,14 +1,12 @@
-//! Index diff: apply_index_diff, apply_index_diff_streaming, apply_index_diff_pooled.
+//! Index diff: apply_index_diff_streaming (stream entries to DB with one writer).
 
 use anyhow::{Context, Result};
 use crossbeam_channel::Receiver;
-use rayon::prelude::*;
 use rusqlite::{Connection, Statement};
 use std::collections::{HashMap, HashSet};
-use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::engine::hashing::{hash_equals, hash_file};
@@ -16,7 +14,6 @@ use crate::engine::tools::mtime_changed;
 use crate::utils::config::{DB_INSERT_BATCH_SIZE, SMALL_FILE_THRESHOLD};
 use crate::{Diff, Entry};
 
-use super::connection::open_db;
 use super::{INSERT_PATH_SQL, StoredMeta};
 
 /// True if the entry is new or its mtime/size/hash differ from existing (within mtime_window_ns).
@@ -53,7 +50,7 @@ fn delete_removed_paths(
     Ok(())
 }
 
-/// Execute one path insert for an entry (shared by flush_batch, apply_index_diff, apply_index_diff_pooled).
+/// Execute one path insert for an entry (used by flush_batch).
 fn execute_insert_entry(stmt: &mut Statement<'_>, e: &Entry) -> Result<()> {
     stmt.execute((
         e.path.to_string_lossy().as_ref(),
@@ -83,87 +80,6 @@ fn flush_batch(
         cb(n);
     }
     Ok(n)
-}
-
-/// Assign path to a writer bucket by hash (reduces lock contention when using multiple writers).
-fn path_bucket(path: &Path, n_buckets: usize) -> usize {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    path.hash(&mut hasher);
-    (hasher.finish() as usize) % n_buckets
-}
-
-/// Apply index diff: insert/update changed entries, delete removed paths.
-/// Calls `on_batch_progress(n)` after each batch of inserts (if provided).
-pub fn apply_index_diff(
-    conn: &mut Connection,
-    entries: &[Entry],
-    existing: &HashMap<PathBuf, StoredMeta>,
-    mtime_window_ns: i64,
-    on_batch_progress: Option<Box<dyn Fn(usize) + Send>>,
-) -> Result<()> {
-    let current_paths: HashSet<_> = entries.iter().map(|e| e.path.clone()).collect();
-
-    let tx = conn.transaction().context("begin transaction")?;
-
-    let mut stmt = tx.prepare(INSERT_PATH_SQL).context("prepare insert")?;
-
-    for chunk in entries.chunks(DB_INSERT_BATCH_SIZE) {
-        for e in chunk {
-            if entry_needs_update(e, existing, mtime_window_ns) {
-                execute_insert_entry(&mut stmt, e)?;
-            }
-        }
-        if let Some(ref cb) = on_batch_progress {
-            cb(chunk.len());
-        }
-    }
-    drop(stmt);
-
-    delete_removed_paths(&tx, existing, &current_paths)?;
-
-    tx.commit().context("commit transaction")?;
-
-    conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))
-        .context("WAL checkpoint")?;
-
-    Ok(())
-}
-
-/// Partition entries (that need update) and deletes by path hash into `n_buckets` for writer pool.
-pub fn partition_index_diff(
-    entries: &[Entry],
-    existing: &HashMap<PathBuf, StoredMeta>,
-    current_paths: &HashSet<PathBuf>,
-    n_buckets: usize,
-    mtime_window_ns: i64,
-) -> Vec<(Vec<Entry>, Vec<PathBuf>)> {
-    let mut buckets: Vec<(Vec<Entry>, Vec<PathBuf>)> =
-        (0..n_buckets).map(|_| (Vec::new(), Vec::new())).collect();
-
-    for e in entries {
-        if entry_needs_update(e, existing, mtime_window_ns) {
-            let b = path_bucket(&e.path, n_buckets);
-            buckets[b].0.push(e.clone());
-        }
-    }
-
-    for old_path in existing.keys() {
-        if !current_paths.contains(old_path) {
-            let b = path_bucket(old_path, n_buckets);
-            buckets[b].1.push(old_path.clone());
-        }
-    }
-
-    buckets
-}
-
-/// Parameters for [`apply_index_diff_pooled`].
-pub struct ApplyIndexDiffPooledParams<'a> {
-    pub db_path: &'a Path,
-    pub mtime_window_ns: i64,
-    pub on_batch_progress: Option<Box<dyn Fn(usize) + Send>>,
-    pub pool_size: usize,
-    pub passphrase: Option<&'a str>,
 }
 
 /// Parameters for [`apply_index_diff_streaming`].
@@ -289,81 +205,4 @@ pub fn apply_index_diff_streaming(
         .context("WAL checkpoint")?;
 
     Ok(written)
-}
-
-/// Apply index diff using a pool of writer connections.
-///
-/// When `params.pool_size > 1`, each writer opens its own connection; `conn` is only used for
-/// the final `PRAGMA wal_checkpoint(TRUNCATE)` after all writers finish.
-pub fn apply_index_diff_pooled(
-    conn: &mut Connection,
-    entries: &[Entry],
-    existing: &HashMap<PathBuf, StoredMeta>,
-    params: ApplyIndexDiffPooledParams<'_>,
-) -> Result<()> {
-    if params.pool_size <= 1 {
-        return apply_index_diff(
-            conn,
-            entries,
-            existing,
-            params.mtime_window_ns,
-            params.on_batch_progress,
-        );
-    }
-
-    let current_paths: HashSet<_> = entries.iter().map(|e| e.path.clone()).collect();
-    let buckets = partition_index_diff(
-        entries,
-        existing,
-        &current_paths,
-        params.pool_size,
-        params.mtime_window_ns,
-    );
-
-    let db_path = params.db_path.to_path_buf();
-    let on_batch_arc = params.on_batch_progress.map(|cb| Arc::new(Mutex::new(cb)));
-    let passphrase = params.passphrase.map(String::from);
-
-    let results: Vec<Result<()>> = buckets
-        .into_par_iter()
-        .map(|(bucket_entries, bucket_deletes)| {
-            let n_written = bucket_entries.len();
-            let mut conn = open_db(&db_path, passphrase.as_deref())?;
-            let tx = conn.transaction().context("begin transaction")?;
-
-            let mut stmt = tx.prepare(INSERT_PATH_SQL).context("prepare insert")?;
-
-            for e in bucket_entries {
-                execute_insert_entry(&mut stmt, &e)?;
-            }
-            drop(stmt);
-
-            let mut delete_stmt = tx
-                .prepare("DELETE FROM paths WHERE path = ?1")
-                .context("prepare delete")?;
-            for p in bucket_deletes {
-                delete_stmt
-                    .execute([p.to_string_lossy().as_ref()])
-                    .context("delete path")?;
-            }
-            drop(delete_stmt);
-
-            tx.commit().context("commit transaction")?;
-            if let Some(ref arc) = on_batch_arc
-                && let Ok(guard) = arc.as_ref().lock()
-            {
-                (*guard)(n_written);
-            }
-            Ok(())
-        })
-        .collect();
-
-    for r in results {
-        r?;
-    }
-
-    conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))
-        .context("WAL checkpoint")?;
-
-    Ok(())
 }
