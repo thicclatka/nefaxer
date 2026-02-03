@@ -1,9 +1,27 @@
 # Nefaxer
 
+[![Crates.io](https://img.shields.io/crates/v/nefaxer.svg)](https://crates.io/crates/nefaxer)
+[![docs.rs](https://img.shields.io/docsrs/nefaxer)](https://docs.rs/nefaxer)
 ![Build](https://github.com/thicclatka/nefaxer/workflows/Build/badge.svg)
 ![Rust](https://img.shields.io/badge/rust-1.93-orange.svg)
 
+> The Demon could sit in a box among air molecules that were moving at all different random speeds, and sort out the fast molecules from the slow ones.  
+> — Koteks on the Nefastis Machine, _[The Crying of Lot 49](https://bookshop.org/p/books/the-crying-of-lot-49-thomas-pynchon/e6265a50e173d7ec?ean=9780060913076&next=t)_
+
 **Nefaxer** is a high-performance directory indexing and change detection tool written in Rust. It walks directory trees in parallel, computes hashes of file contents, and stores metadata in a fast indexed database. Compare the current state of a directory against a previous snapshot to detect additions, deletions, and modifications.
+
+## Install
+
+```bash
+# library
+cargo add nefaxer
+
+# CLI (from crates.io)
+cargo install nefaxer
+
+# Source archive
+# Download from: https://github.com/thicclatka/nefaxer/releases
+```
 
 ## Features
 
@@ -32,10 +50,10 @@ nefaxer --dry-run [OPTIONS] [DIR]
 | ----------------------- | ----- | ------------------------------------------------------------------------------------------------ |
 | `--db <DB>`             | `-d`  | Path to index file. Default: `.nefaxer` in DIR                                                   |
 | `--dry-run`             |       | Compare only; report diff, do not update index                                                   |
-| `--list`                |       | List each changed path. If total changes > 100, write to `nefaxer.results` instead of stdout     |
+| `--list`                | `-l`  | List each changed path. If total changes > 100, write to `nefaxer.results` instead of stdout     |
 | `--verbose`             | `-v`  | Verbose output and progress bar                                                                  |
 | `--check-hash`          | `-c`  | Compute Blake3 hash for files (slower, more accurate diff)                                       |
-| `--follow-links`        | `-l`  | Follow symbolic links                                                                            |
+| `--follow-links`        | `-f`  | Follow symbolic links                                                                            |
 | `--mtime-window <SECS>` | `-m`  | Mtime tolerance in seconds (default: 0)                                                          |
 | `--exclude <PATTERN>`   | `-e`  | Exclude glob patterns (repeatable)                                                               |
 | `--encrypt`             | `-x`  | Encrypt the index database with SQLCipher. Prompts for passphrase (or use NEFAXER_DB_KEY / .env) |
@@ -47,7 +65,7 @@ nefaxer --dry-run [OPTIONS] [DIR]
 When running the binary, you can put a `.nefaxer.toml` in the directory you index. Options from the file are used as defaults; command-line options override them.
 
 ```toml
-[index]
+[settings]
 db_path = ".nefaxer"
 hash = true
 follow_links = false
@@ -140,4 +158,4 @@ let nefax = nefax_dir(Path::new("/some/dir"), &NefaxOpts::default())?;
 
 ## License
 
-Dual-licensed under MIT or Apache-2.0 (your choice).
+Dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE).

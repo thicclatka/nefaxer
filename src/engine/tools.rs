@@ -20,6 +20,28 @@ pub fn path_to_db_string(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
+/// On Windows: convert path to long-path form (`\\?\` or `\\?\UNC\`) so paths >260 chars work. On Unix: no-op.
+#[cfg(windows)]
+pub fn path_to_long_path(path: &Path) -> PathBuf {
+    let s = path.to_string_lossy();
+    if s.starts_with(r"\\?\") {
+        return path.to_path_buf();
+    }
+    if s.starts_with(r"\\") && !s.starts_with(r"\\?\") {
+        return PathBuf::from(format!(r"\\?\UNC\{}", &s[2..]));
+    }
+    if s.len() >= 2 && s.chars().nth(1) == Some(':') {
+        return PathBuf::from(format!(r"\\?\{}", s));
+    }
+    path.to_path_buf()
+}
+
+/// On Unix: no-op (long-path prefix is Windows-only).
+#[cfg(not(windows))]
+pub fn path_to_long_path(path: &Path) -> PathBuf {
+    path.to_path_buf()
+}
+
 /// Check if a file should be excluded based on OS-specific hidden files
 pub fn is_os_hidden_file(path: &Path) -> bool {
     if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
@@ -163,6 +185,7 @@ pub fn running_as_root() -> bool {
 }
 
 pub fn check_root_and_canonicalize(path: &Path) -> Result<PathBuf> {
+    let path = path_to_long_path(path);
     let path = path
         .canonicalize()
         .with_context(|| format!("canonicalize path {}", path.display()))?;
@@ -176,8 +199,12 @@ pub fn canonicalize_paths(
     temp_path: Option<&Path>,
 ) -> Result<(PathBuf, Option<PathBuf>, Option<PathBuf>)> {
     let root = check_root_and_canonicalize(root)?;
-    let db_canonical = db_path.and_then(|p| p.canonicalize().ok());
-    let temp_canonical = temp_path.and_then(|p| p.canonicalize().ok());
+    let db_canonical = db_path
+        .map(path_to_long_path)
+        .and_then(|p| p.canonicalize().ok());
+    let temp_canonical = temp_path
+        .map(path_to_long_path)
+        .and_then(|p| p.canonicalize().ok());
     Ok((root, db_canonical, temp_canonical))
 }
 

@@ -4,9 +4,12 @@ version = "0.1.1"
 edition = "2024"
 rust-version = "1.93"
 authors = ["AHurowitz <thicclatka@users.noreply.github.com>"]
+description = "High-performance directory indexer with content-aware diffing. Walks trees in parallel, stores metadata in SQLite, compares against a previous snapshot."
 license = "MIT or Apache-2.0"
-readme = "README.md"
 repository = "https://github.com/thicclatka/nefaxer"
+homepage = "https://github.com/thicclatka/nefaxer"
+documentation = "https://docs.rs/nefaxer"
+readme = "README.md"
 keywords = ["directory", "index", "diff", "sqlite", "change-detection"]
 categories = [
   "command-line-utilities",

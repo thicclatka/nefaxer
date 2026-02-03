@@ -8,7 +8,7 @@ use crate::Opts;
 #[derive(Debug, Deserialize)]
 pub(crate) struct NefaxerToml {
     #[serde(default)]
-    index: IndexSection,
+    settings: IndexSection,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -45,7 +45,7 @@ macro_rules! apply_file_opt {
 
 /// Apply file config to opts (only set fields present in the file). Call before applying CLI. dry_run is never in the file.
 pub(crate) fn apply_file_to_opts(file: &NefaxerToml, opts: &mut Opts) {
-    let idx = &file.index;
+    let idx = &file.settings;
     if let Some(ref p) = idx.db_path {
         opts.db_path = Some(PathBuf::from(p));
     }
