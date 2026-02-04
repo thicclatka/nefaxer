@@ -129,7 +129,10 @@ where
     F: FnMut(&crate::Entry),
 {
     let existing_stored = match existing {
-        Some(ex) => nefax_to_stored(ex),
+        Some(ex) => {
+            crate::validate_nefax(ex)?;
+            nefax_to_stored(ex)
+        }
         None => {
             let conn = engine::open_db_in_memory()?;
             engine::load_index(&conn)?
@@ -151,7 +154,10 @@ pub(crate) fn nefax_dir_with_opts(
 ) -> Result<(crate::Nefax, crate::Diff)> {
     if !opts.write_to_db {
         let existing_stored = match existing {
-            Some(ex) => nefax_to_stored(ex),
+            Some(ex) => {
+                crate::validate_nefax(ex)?;
+                nefax_to_stored(ex)
+            }
             None => {
                 let conn = engine::open_db_in_memory()?;
                 engine::load_index(&conn)?
