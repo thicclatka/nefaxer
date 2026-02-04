@@ -57,7 +57,7 @@ pub fn handle_run(cli: &Cli) -> Result<()> {
         check_dir(&cli.dir, &opts)?;
     } else {
         debug!("Nefaxing directory...");
-        nefax_dir_with_opts(&cli.dir, &opts)?;
+        let _ = nefax_dir_with_opts(&cli.dir, &opts, None)?;
     }
     Ok(())
 }

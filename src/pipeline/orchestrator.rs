@@ -90,7 +90,7 @@ pub fn setup_pipeline_root_and_tuning(
 
     let (num_threads, drive_type, parallel_walk) = determine_threads_for_drive(
         &root,
-        conn,
+        Some(conn),
         WorkerThreadLimits::current().all_threads,
         opts.num_threads,
     );

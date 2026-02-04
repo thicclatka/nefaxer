@@ -1,4 +1,7 @@
-//! Cross-platform disk type detection for performance tuning
+//! Cross-platform disk type detection for pipeline tuning.
+//!
+//! Used by the CLI/pipeline (with a DB connection for caching on network drives) and by library
+//! callers (with no DB). See [`determine_threads_for_drive`] for the main API.
 
 use log::debug;
 use std::path::Path;
@@ -105,12 +108,18 @@ pub fn channel_cap_for_drive(drive_type: DriveType) -> usize {
     }
 }
 
-/// Returns (num_threads, drive_type, use_parallel_walk).
-/// use_parallel_walk: true for SSD and Network+SSD (jwalk), false for HDD and Network+HDD (walkdir).
-/// When `thread_override` is Some(n), use that instead of drive-derived count (still capped by FD limit).
+/// Returns `(num_threads, drive_type, use_parallel_walk)` for pipeline tuning.
+///
+/// - **CLI / pipeline:** pass `Some(conn)` so network probe results can be cached in the DB.
+/// - **Library / no DB:** pass `conn: None`; network probe still runs but is not cached. Use
+///   [`crate::tuning_for_path`] for a convenience wrapper that fills [`crate::NefaxOpts`].
+///
+/// Return value: worker count (FD limit applied), drive type (SSD/HDD/Network/Unknown), and
+/// `use_parallel_walk` (`true` for jwalk, `false` for walkdir). `thread_override` forces the
+/// thread count (still capped by FD limit).
 pub fn determine_threads_for_drive(
     path: &Path,
-    conn: &Connection,
+    conn: Option<&Connection>,
     available_threads: usize,
     thread_override: Option<usize>,
 ) -> (usize, DriveType, bool) {

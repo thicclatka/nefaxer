@@ -5,105 +5,51 @@ pub mod disk_detect;
 pub mod engine;
 pub mod index;
 pub mod pipeline;
+pub mod types;
 pub mod utils;
 
-use std::collections::HashMap;
-use std::path::PathBuf;
+/// Re-export types for API
+pub use types::*;
 
-// Re-export main API (lib only; check_dir is CLI-internal)
-pub use index::nefax_dir;
+use anyhow::Result;
+use std::path::Path;
 
-/// Metadata for a single path (file or dir). Dirs have size 0 and no hash.
-#[derive(Clone, Debug)]
-pub struct Entry {
-    pub path: PathBuf,
-    pub mtime_ns: i64,
-    pub size: u64,
-    pub hash: Option<[u8; 32]>,
-}
-
-/// Metadata for one path in the index (same shape as a row in the `.nefaxer` DB).
-#[derive(Clone, Debug)]
-pub struct PathMeta {
-    pub mtime_ns: i64,
-    pub size: u64,
-    pub hash: Option<[u8; 32]>,
-}
-
-/// Result of comparing a directory to an existing index.
-#[derive(Default)]
-pub struct Diff {
-    pub added: Vec<PathBuf>,
-    pub removed: Vec<PathBuf>,
-    pub modified: Vec<PathBuf>,
-}
-
-/// The nefax map: path → metadata. Same shape as the `.nefaxer` DB. Returned by [`nefax_dir`].
-pub type Nefax = HashMap<PathBuf, PathMeta>;
-
-/// Lib-only options for [`nefax_dir`]. Only the fields that apply when using the crate (no DB).
-#[derive(Clone, Debug, Default)]
-pub struct NefaxOpts {
-    /// Override worker thread count. When None, derived from drive type and FD limit.
-    pub num_threads: Option<usize>,
-    /// Compute blake3 hash for files (slower but accurate change detection).
-    pub with_hash: bool,
-    /// Follow symbolic links.
-    pub follow_links: bool,
-    /// Exclude patterns (glob syntax, e.g. `node_modules`, `*.log`).
-    pub exclude: Vec<String>,
-    /// Mtime tolerance window in nanoseconds.
-    pub mtime_window_ns: i64,
-    /// Strict mode: fail on first permission/access error instead of skipping.
-    pub strict: bool,
-    /// Paranoid mode: re-hash when hash matches but mtime/size differ.
-    pub paranoid: bool,
-}
-
-impl From<&NefaxOpts> for Opts {
-    fn from(o: &NefaxOpts) -> Self {
-        Opts {
-            db_path: None,
-            num_threads: o.num_threads,
-            with_hash: o.with_hash,
-            follow_links: o.follow_links,
-            exclude: o.exclude.clone(),
-            verbose: false,
-            mtime_window_ns: o.mtime_window_ns,
-            strict: o.strict,
-            paranoid: o.paranoid,
-            encrypt: false,
-            list_paths: false,
-            write_to_db: false,
-        }
+/// Single entry point: index `root` with `opts`, optionally diff against `existing`, and return `(nefax, diff)`.
+///
+/// - **`on_entry: None`** → non-callback path ([`nefax_dir_with_opts`](crate::index::nefax_dir_with_opts)). Used by CLI and by lib when you don't need streaming.
+/// - **`on_entry: Some(f)`** → callback path (streaming). Lib-only; `f` is invoked for each entry as it's ready. Keep it fast or send to a channel.
+///
+/// Pass `existing: None` for a fresh index (diff will be all added); `Some(&nefax)` to diff against a previous snapshot (e.g. loaded from your own DB).
+pub fn nefax_dir<F>(
+    root: &Path,
+    opts: &NefaxOpts,
+    existing: Option<&Nefax>,
+    on_entry: Option<F>,
+) -> Result<(Nefax, Diff)>
+where
+    F: FnMut(&Entry),
+{
+    let opts = Opts::from(opts);
+    match on_entry {
+        None => index::nefax_dir_with_opts(root, &opts, existing),
+        Some(mut f) => index::nefax_dir_callback(root, &opts, existing, |e| f(e)),
     }
 }
 
-/// Full options (CLI and check). Use [`NefaxOpts`] for lib.
-#[derive(Clone, Default)]
-pub struct Opts {
-    /// Index database path. When None, uses `root.join(<package index filename>)` (e.g. `.nefaxer`).
-    pub db_path: Option<PathBuf>,
-    /// Override worker thread count. When None, derived from drive type and FD limit.
-    pub num_threads: Option<usize>,
-    /// Compute blake3 hash for files (slower but accurate change detection).
-    pub with_hash: bool,
-    /// Follow symbolic links.
-    pub follow_links: bool,
-    /// Exclude patterns (glob syntax).
-    pub exclude: Vec<String>,
-    /// Show progress bar (verbose mode).
-    pub verbose: bool,
-    /// Mtime tolerance window in nanoseconds.
-    pub mtime_window_ns: i64,
-    /// Strict mode: fail on first permission/access error instead of skipping.
-    pub strict: bool,
-    /// Paranoid mode (check): re-hash when hash matches but mtime/size differ.
-    pub paranoid: bool,
-    /// Encrypt the index database with SQLCipher.
-    pub encrypt: bool,
-    /// List each changed path (added/removed/modified). If total > LIST_THRESHOLD, write to nefaxer.results instead of stdout.
-    pub list_paths: bool,
-    /// When true, write index to DB (CLI). When false, run pipeline and return diff only (lib).
-    pub write_to_db: bool,
+/// Returns `(num_threads, drive_type, use_parallel_walk)` for use in [`NefaxOpts`] when you have no DB.
+///
+/// Calls [`determine_threads_for_drive`](determine_threads_for_drive) with `conn: None` (network probe runs but is not cached).
+/// Set all three on `NefaxOpts` so [`nefax_dir`] skips disk detection:
+///
+/// ```ignore
+/// let (n, dt, pw) = nefaxer::tuning_for_path(path, None);
+/// let opts = NefaxOpts { num_threads: Some(n), drive_type: Some(dt), use_parallel_walk: Some(pw), ..Default::default() };
+/// let (nefax, _diff) = nefaxer::nefax_dir(path, &opts, None, None)?;
+/// ```
+pub fn tuning_for_path(
+    path: &std::path::Path,
+    available_threads: Option<usize>,
+) -> (usize, disk_detect::DriveType, bool) {
+    let avail = available_threads.unwrap_or_else(rayon::current_num_threads);
+    disk_detect::determine_threads_for_drive(path, None, avail, None)
 }

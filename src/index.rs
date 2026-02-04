@@ -4,18 +4,20 @@ use anyhow::Result;
 use crossbeam_channel::Receiver;
 use kdam::{Animation, Bar};
 use log::info;
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
 
+use crate::Opts;
 use crate::engine;
+use crate::engine::StoredMeta;
 use crate::engine::progress;
 use crate::pipeline::{
     PipelineHandles, check_for_initial_error_or_skipped_paths, run_pipeline,
     shutdown_pipeline_handles,
 };
 use crate::utils::{get_passphrase, prepare_index_work_path, rename_temp_to_final};
-use crate::{NefaxOpts, Opts};
 
 /// Build progress bar and callbacks for streaming index. Returns (bar, on_batch, on_received).
 /// For local drives: percentage bar + on_batch; path_count_rx is consumed in a background thread to set total.
@@ -81,29 +83,82 @@ fn collect_pipeline_results(
     Ok(path_count)
 }
 
-/// Nefax directory at `root`: walk, build current index, return the nefax map. Lib API; uses [`NefaxOpts`].
-pub fn nefax_dir(root: &Path, opts: &NefaxOpts) -> Result<crate::Nefax> {
-    nefax_dir_with_opts(root, &Opts::from(opts))
+/// Convert public Nefax (path → PathMeta) to internal StoredMeta map for diff.
+fn nefax_to_stored(existing: &crate::Nefax) -> HashMap<PathBuf, StoredMeta> {
+    existing
+        .iter()
+        .map(|(p, m)| (p.clone(), (m.mtime_ns, m.size, m.hash.map(|h| h.to_vec()))))
+        .collect()
 }
 
-/// Internal: full opts (CLI or converted from NefaxOpts). Used by CLI.
-pub(crate) fn nefax_dir_with_opts(root: &Path, opts: &Opts) -> Result<crate::Nefax> {
+/// Lib path: run pipeline against in-memory conn, diff against existing (StoredMeta map). No DB file.
+/// Pass a no-op (e.g. `|_| {}`) when not using the callback.
+fn run_lib_pipeline_with_callback<F>(
+    root: &Path,
+    opts: &Opts,
+    existing: &HashMap<PathBuf, StoredMeta>,
+    on_entry: F,
+) -> Result<(crate::Nefax, crate::Diff)>
+where
+    F: FnMut(&crate::Entry),
+{
+    let conn = engine::open_db_in_memory()?;
+    let PipelineHandles {
+        entry_rx,
+        walk_handle,
+        worker_handles,
+        first_error,
+        skipped_paths,
+        ..
+    } = run_pipeline(root, opts, None, None, &conn)?;
+    let (diff, index_map) =
+        crate::check::diff_from_stream_with_callback(entry_rx, existing, root, opts, on_entry);
+    shutdown_pipeline_handles(walk_handle, worker_handles)?;
+    check_for_initial_error_or_skipped_paths(opts, &first_error, &skipped_paths)?;
+    Ok((index_map, diff))
+}
+
+/// Internal: run pipeline with callback; diff against `existing` (when `None`, use empty map). Returns `(nefax, diff)`. Lib-only (streaming).
+pub(crate) fn nefax_dir_callback<F>(
+    root: &Path,
+    opts: &Opts,
+    existing: Option<&crate::Nefax>,
+    on_entry: F,
+) -> Result<(crate::Nefax, crate::Diff)>
+where
+    F: FnMut(&crate::Entry),
+{
+    let existing_stored = match existing {
+        Some(ex) => nefax_to_stored(ex),
+        None => {
+            let conn = engine::open_db_in_memory()?;
+            engine::load_index(&conn)?
+        }
+    };
+    run_lib_pipeline_with_callback(root, opts, &existing_stored, on_entry)
+}
+
+/// Internal: full opts (CLI or lib). Non-callback path: handles both CLI (write_to_db) and lib (no DB). Returns `(nefax, diff)`.
+///
+/// # Arguments
+/// * `root` - Directory to index (walk root).
+/// * `opts` - Full options (from CLI or converted from [`NefaxOpts`](crate::NefaxOpts)). When `write_to_db` is false, lib path; when true, CLI path (writes to DB).
+/// * `existing` - Used only on lib path (`write_to_db` false). When `None`, use empty prior state (in-memory DB, **no** `.nefaxer` file read; diff will be all added). When `Some`, diff against that snapshot. On CLI path this is ignored and the previous index is loaded from the `.nefaxer` file on disk if it exists.
+pub(crate) fn nefax_dir_with_opts(
+    root: &Path,
+    opts: &Opts,
+    existing: Option<&crate::Nefax>,
+) -> Result<(crate::Nefax, crate::Diff)> {
     if !opts.write_to_db {
-        // Lib path: no DB file in lib use. Use in-memory conn and empty index; run pipeline, build diff, no write.
-        let conn = engine::open_db_in_memory()?;
-        let existing = engine::load_index(&conn)?;
-        let PipelineHandles {
-            entry_rx,
-            walk_handle,
-            worker_handles,
-            first_error,
-            skipped_paths,
-            ..
-        } = run_pipeline(root, opts, None, None, &conn)?;
-        let (_, index_map) = crate::check::diff_from_stream(entry_rx, &existing, root, opts);
-        shutdown_pipeline_handles(walk_handle, worker_handles)?;
-        check_for_initial_error_or_skipped_paths(opts, &first_error, &skipped_paths)?;
-        return Ok(index_map);
+        let existing_stored = match existing {
+            Some(ex) => nefax_to_stored(ex),
+            None => {
+                let conn = engine::open_db_in_memory()?;
+                engine::load_index(&conn)?
+            }
+        };
+        // Pass a no-op (e.g. `|_| {}`) when not using the callback.
+        return run_lib_pipeline_with_callback(root, opts, &existing_stored, |_| {});
     }
 
     // CLI path: write to DB (temp then rename).
@@ -181,6 +236,6 @@ pub(crate) fn nefax_dir_with_opts(root: &Path, opts: &Opts) -> Result<crate::Nef
         info!("New nefaxer index created.");
     }
 
-    // CLI does not need the full index as return value; diff was built during streaming. Return empty.
-    Ok(std::collections::HashMap::new())
+    // CLI does not need the full index as return value; diff was built during streaming.
+    Ok((std::collections::HashMap::new(), index_diff))
 }

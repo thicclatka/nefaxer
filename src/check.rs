@@ -90,6 +90,30 @@ pub fn diff_from_stream(
     root: &Path,
     opts: &Opts,
 ) -> (Diff, HashMap<PathBuf, PathMeta>) {
+    diff_from_stream_impl(entry_rx, index, root, opts, None)
+}
+
+/// Like [`diff_from_stream`] but invokes `on_entry` for each entry (after hash fill). Use for streaming progress or forwarding to another stage (e.g. zahir).
+pub fn diff_from_stream_with_callback<F>(
+    entry_rx: Receiver<Entry>,
+    index: &HashMap<PathBuf, engine::StoredMeta>,
+    root: &Path,
+    opts: &Opts,
+    mut on_entry: F,
+) -> (Diff, HashMap<PathBuf, PathMeta>)
+where
+    F: FnMut(&Entry),
+{
+    diff_from_stream_impl(entry_rx, index, root, opts, Some(&mut on_entry))
+}
+
+fn diff_from_stream_impl(
+    entry_rx: Receiver<Entry>,
+    index: &HashMap<PathBuf, engine::StoredMeta>,
+    root: &Path,
+    opts: &Opts,
+    mut on_entry: Option<&mut dyn FnMut(&Entry)>,
+) -> (Diff, HashMap<PathBuf, PathMeta>) {
     let mut index_keys_not_seen: HashSet<PathBuf> = index.keys().cloned().collect();
     let mut added = Vec::new();
     let mut modified = Vec::new();
@@ -113,6 +137,9 @@ pub fn diff_from_stream(
 
         for mut entry in chunk.drain(..) {
             engine::fill_entry_hash_if_needed(&mut entry, index, root, opts);
+            if let Some(ref mut f) = on_entry {
+                f(&entry);
+            }
             current_index.insert(
                 entry.path.clone(),
                 PathMeta {

@@ -1,6 +1,6 @@
 [package]
 name = "nefaxer"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 rust-version = "1.93"
 authors = ["AHurowitz <thicclatka@users.noreply.github.com>"]
@@ -30,7 +30,7 @@ path = "src/lib.rs"
 [dependencies]
 anyhow = "1.0.100"
 blake3 = "1.8.3"
-clap = { version = "4.5.56", features = ["derive"] }
+clap = { version = "4.5.57", features = ["derive"] }
 crossbeam-channel = "0.5.14"
 ctrlc = "3.5.1"
 derive = "1.0.0"

@@ -55,12 +55,13 @@ pub struct NetworkInfo {
     pub measured_at: u64,
 }
 
-/// Detect optimal worker count with caching (stored in the nefaxer DB diskinfo table).
-/// For network drives also returns use_parallel_walk (true when cached disk type contains "SSD").
+/// Detect optimal worker count. For network drives optionally uses DB cache (when `conn` is Some).
+/// When `conn` is None, probe still runs for network drives but result is not cached.
+/// Returns (workers, use_parallel_walk). use_parallel_walk is true when disk type is SSD.
 pub fn detect_optimal_workers(
     path: &Path,
     base_drive_type: DriveType,
-    conn: &Connection,
+    conn: Option<&Connection>,
 ) -> Result<(usize, bool)> {
     // Only probe if it's a network mount
     if !base_drive_type.is_network() {
@@ -70,20 +71,23 @@ pub fn detect_optimal_workers(
 
     let root_key = path.to_string_lossy();
 
-    // Try to load cached disk type from DB
-    let disk_info = match load_cache_from_db(conn, &root_key) {
-        Ok(Some(info)) => {
-            debug!(
-                "Loaded cached disk type: {} (tested: {})",
-                info.disk_type.drive_type, info.disk_type.tested_at
-            );
-            Some(info)
-        }
-        Ok(None) => None,
-        Err(e) => {
-            debug!("Failed to load cache: {}, will re-probe", e);
-            None
-        }
+    // Try to load cached disk type from DB when conn is provided
+    let disk_info = match conn {
+        Some(c) => match load_cache_from_db(c, &root_key) {
+            Ok(Some(info)) => {
+                debug!(
+                    "Loaded cached disk type: {} (tested: {})",
+                    info.disk_type.drive_type, info.disk_type.tested_at
+                );
+                Some(info)
+            }
+            Ok(None) => None,
+            Err(e) => {
+                debug!("Failed to load cache: {}, will re-probe", e);
+                None
+            }
+        },
+        None => None,
     };
 
     // Get or probe disk type
@@ -102,20 +106,26 @@ pub fn detect_optimal_workers(
     let workers = calculate_workers(&disk_type_info, &network_info);
     let use_parallel_walk = disk_type_info.drive_type.contains("SSD");
 
-    // Save cache to DB (update network info)
-    let cache_data = DiskInfo {
-        disk_type: disk_type_info,
-        network: Some(network_info),
-        recommended_workers: workers,
-    };
-    save_cache_to_db(conn, &root_key, &cache_data)?;
-
-    debug!(
-        "Drive: {}, Network latency: {:.1}ms, Workers: {}",
-        cache_data.disk_type.drive_type,
-        cache_data.network.as_ref().unwrap().latency_ms,
-        workers
-    );
+    // Save cache to DB only when conn is provided
+    if let Some(c) = conn {
+        let cache_data = DiskInfo {
+            disk_type: disk_type_info,
+            network: Some(network_info),
+            recommended_workers: workers,
+        };
+        save_cache_to_db(c, &root_key, &cache_data)?;
+        debug!(
+            "Drive: {}, Network latency: {:.1}ms, Workers: {}",
+            cache_data.disk_type.drive_type,
+            cache_data.network.as_ref().unwrap().latency_ms,
+            workers
+        );
+    } else {
+        debug!(
+            "Drive: {}, Network latency: {:.1}ms, Workers: {}",
+            disk_type_info.drive_type, network_info.latency_ms, workers
+        );
+    }
 
     Ok((workers, use_parallel_walk))
 }
