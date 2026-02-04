@@ -3,6 +3,8 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use anyhow::Result;
+
 /// Metadata for a single path (file or dir). Dirs have size 0 and no hash.
 #[derive(Clone, Debug)]
 pub struct Entry {
@@ -37,8 +39,48 @@ pub struct Diff {
 ///
 /// **Shape:** `HashMap<PathBuf, PathMeta>` where each key is a path (relative to the indexed root)
 /// and each value is [`PathMeta`] (`mtime_ns`, `size`, `hash`). Returned by [`nefax_dir`](crate::nefax_dir); you can also build one from your own table and
-/// pass it as `existing`.
+/// pass it as `existing`. Use [`validate_nefax`] before passing as `existing` to ensure the map fits (paths relative, etc.).
 pub type Nefax = HashMap<PathBuf, PathMeta>;
+
+/// Plausible mtime_ns range: pre-1970 to ~year 2242. Rejects obvious corruption (e.g. negative overflow or garbage).
+const MTIME_NS_MIN: i64 = -1_000_000_000_000_000_000; // ~year 1680
+const MTIME_NS_MAX: i64 = 4_611_686_018_427_387_903; // ~year 2242 in ns since epoch
+/// Max file size (1 exabyte). Rejects overflow/corruption sentinels.
+const SIZE_MAX: u64 = 1_000_000_000_000_000_000;
+
+/// Validates that a [`Nefax`] map is suitable for use as `existing` in [`nefax_dir`](crate::nefax_dir).
+/// Single pass: paths must be relative and non-empty; [`PathMeta`] fields must be in plausible ranges (rejects corrupted data).
+pub fn validate_nefax(nefax: &Nefax) -> Result<()> {
+    for (path, meta) in nefax {
+        if path.as_path().is_absolute() {
+            anyhow::bail!(
+                "existing index contains absolute path (must be relative to indexed root): {}",
+                path.display()
+            );
+        }
+        if path.as_os_str().is_empty() {
+            anyhow::bail!("existing index contains empty path");
+        }
+        if meta.mtime_ns < MTIME_NS_MIN || meta.mtime_ns > MTIME_NS_MAX {
+            anyhow::bail!(
+                "existing index invalid mtime_ns for path {}: {} (expected {}..={})",
+                path.display(),
+                meta.mtime_ns,
+                MTIME_NS_MIN,
+                MTIME_NS_MAX
+            );
+        }
+        if meta.size > SIZE_MAX {
+            anyhow::bail!(
+                "existing index invalid size for path {}: {} (max {})",
+                path.display(),
+                meta.size,
+                SIZE_MAX
+            );
+        }
+    }
+    Ok(())
+}
 
 /// Lib-only options for [`nefax_dir`](crate::nefax_dir). Only the fields that apply when using the crate (no DB).
 #[derive(Clone, Debug, Default)]

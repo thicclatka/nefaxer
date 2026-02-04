@@ -78,22 +78,6 @@ paranoid = false
 encrypt = false
 ```
 
-### Examples
-
-```bash
-# Index current dir, verbose
-nefaxer -v
-
-# Index with content hashing and exclude node_modules
-nefaxer -c -e 'node_modules' -e '*.log'
-
-# Compare only (no index write), strict
-nefaxer --dry-run --strict
-
-# Compare with paranoid re-hash for collision detection
-nefaxer --dry-run -c --paranoid
-```
-
 ## Database schema
 
 Index file (default `.nefaxer`, WAL mode):
@@ -114,13 +98,17 @@ CREATE TABLE diskinfo (
 
 ## Library
 
-Use the crate for programmatic indexing and diffing. The API returns a full current index (same shape as the `.nefaxer` DB).
+Use the crate for programmatic indexing and diffing. Single entry point; returns the current index and a diff. The API supports tuning (`tuning_for_path`) and streaming via callback.
 
 ### Entry point
 
-- **`nefax_dir(root, opts)`** — Walk `root`, build and return the nefax map. Returns **`Result<Nefax>`** (path → metadata).
+- **`nefax_dir(root, opts, existing, on_entry)`** — Index `root` with `opts`. Returns **`Result<(Nefax, Diff)>`**.
+  - **`existing`** — `None` for a fresh run (diff = all added); `Some(&nefax)` to diff against a previous snapshot (e.g. a `Nefax` you built from your own DB/table).
+  - **`on_entry`** — `None` for batch (non-streaming); `Some(|entry| { ... })` to get each entry as it’s ready (streaming, e.g. for progress or forwarding to another pipeline). Callback runs on the consumer thread; keep it fast or send to a channel.
 
-### Result type
+- **`tuning_for_path(path, available_threads)`** — Returns `(num_threads, drive_type, use_parallel_walk)` so you can set `NefaxOpts` and skip drive detection.
+
+### Types
 
 ```rust
 pub type Nefax = HashMap<PathBuf, PathMeta>;
@@ -130,15 +118,28 @@ pub struct PathMeta {
     pub size: u64,
     pub hash: Option<[u8; 32]>,
 }
+
+pub struct Entry {  // per-path in callback
+    pub path: PathBuf,
+    pub mtime_ns: i64,
+    pub size: u64,
+    pub hash: Option<[u8; 32]>,
+}
+
+pub struct Diff {
+    pub added: Vec<PathBuf>,
+    pub removed: Vec<PathBuf>,
+    pub modified: Vec<PathBuf>,
+}
 ```
 
-Same shape as the `.nefaxer` DB. Diff against a previous nefax if you need added/removed/modified.
+Same shape as the `.nefaxer` DB. When you pass `existing: Some(&nefax)` from your own table, **`nefax_dir` validates it internally** (paths relative and non-empty, `mtime_ns`/`size` in valid ranges) and returns an error if invalid. You can call **`validate_nefax(&nefax)`** yourself for fail-early (e.g. right after loading from your DB).
 
 ### NefaxOpts
 
 Use `NefaxOpts::default()` and override as needed:
 
-- `num_threads` — override worker count (default: derived from drive)
+- `num_threads`, `drive_type`, `use_parallel_walk` — set all three (e.g. from `tuning_for_path`) to skip drive detection
 - `with_hash` — compute Blake3 for files
 - `follow_links` — follow symlinks
 - `exclude` — glob patterns to skip (e.g. `node_modules`, `*.log`)
@@ -146,14 +147,37 @@ Use `NefaxOpts::default()` and override as needed:
 - `strict` — fail on first permission/access error
 - `paranoid` — re-hash when hash matches but mtime/size differ
 
-### Example
+### Examples
 
 ```rust
-use nefaxer::{nefax_dir, NefaxOpts};
+use nefaxer::{nefax_dir, validate_nefax, NefaxOpts, tuning_for_path};
 use std::path::Path;
 
-let nefax = nefax_dir(Path::new("/some/dir"), &NefaxOpts::default())?;
-// nefax: HashMap<PathBuf, PathMeta>
+// Fresh index, batch: get (nefax, diff) with diff = all added
+let (nefax, diff) = nefax_dir(Path::new("/some/dir"), &NefaxOpts::default(), None, None)?;
+
+// Diff against a previous snapshot: build Nefax from your table (path → PathMeta), pass as existing.
+// Validation runs inside nefax_dir; optional: validate_nefax(&prior)? to fail early after loading.
+// let prior: Nefax = /* your table → HashMap<PathBuf, PathMeta> */;
+// let (nefax, diff) = nefax_dir(Path::new("/some/dir"), &opts, Some(&prior), None)?;
+
+// Streaming: process each entry as it’s ready
+let (nefax, diff) = nefax_dir(
+    Path::new("/some/dir"),
+    &opts,
+    None,
+    Some(|e: &nefaxer::Entry| { /* stream to zahir, update progress, etc. */ }),
+)?;
+
+// Skip drive detection using tuning
+let (n, dt, pw) = tuning_for_path(Path::new("/some/dir"), None);
+let opts = NefaxOpts {
+    num_threads: Some(n),
+    drive_type: Some(dt),
+    use_parallel_walk: Some(pw),
+    ..Default::default()
+};
+let (nefax, _) = nefax_dir(Path::new("/some/dir"), &opts, None, None)?;
 ```
 
 ## License
