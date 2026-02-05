@@ -1,10 +1,9 @@
 //! Passphrase loading for SQLCipher: env var → .env in dir → secure prompt.
 
 use anyhow::{Context, Result};
+use colored::Colorize;
 use log::{info, warn};
 use std::path::Path;
-
-use super::Colors;
 
 const ENV_KEY: &str = "NEFAXER_DB_KEY";
 
@@ -36,7 +35,7 @@ pub fn get_passphrase(dir: &Path, is_new: bool) -> Result<String> {
         info!("Passphrase found in environment");
         return Ok(s);
     }
-    let label = Colors::colorize(Colors::BRAND, &format!("[{}]", env!("CARGO_PKG_NAME")));
+    let label = format!("[{}]", env!("CARGO_PKG_NAME")).cyan().bold();
     let prompt = if is_new {
         "Create new passphrase: "
     } else {
