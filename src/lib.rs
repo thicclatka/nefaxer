@@ -11,7 +11,19 @@ pub mod utils;
 /// Re-export types for API
 pub use types::*;
 
-use anyhow::Result;
+/// Error type for nefaxer operations (re-export of [`anyhow::Error`]).
+///
+/// Use this in your own signatures when wrapping nefaxer, e.g.
+/// `Result<(Nefax, Diff), nefaxer::Error>` or match on `nefaxer::Error` for downcasting.
+pub use anyhow::Error;
+
+use log::debug;
+
+/// Result alias used by public nefaxer API. Equivalent to `std::result::Result<T, Error>`.
+///
+/// You can use `nefaxer::Result<(Nefax, Diff)>` in your crate without naming the error type.
+pub type Result<T> = std::result::Result<T, Error>;
+
 use std::path::Path;
 
 /// Single entry point: index `root` with `opts`, optionally diff against `existing`, and return `(nefax, diff)`.
@@ -30,6 +42,7 @@ where
     F: FnMut(&Entry),
 {
     let opts = Opts::from(opts);
+    debug!("NEFAXER CONFIG: {:?}", opts);
     match on_entry {
         None => index::nefax_dir_with_opts(root, &opts, existing),
         Some(mut f) => index::nefax_dir_callback(root, &opts, existing, |e| f(e)),

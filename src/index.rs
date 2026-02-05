@@ -115,6 +115,7 @@ where
         crate::check::diff_from_stream_with_callback(entry_rx, existing, root, opts, on_entry);
     shutdown_pipeline_handles(walk_handle, worker_handles)?;
     check_for_initial_error_or_skipped_paths(opts, &first_error, &skipped_paths)?;
+    engine::print_diff(&diff, false, opts.list_paths, root);
     Ok((index_map, diff))
 }
 

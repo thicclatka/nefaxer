@@ -89,14 +89,18 @@ pub fn should_include_in_walk(
     if exclude_patterns.is_empty() {
         return true;
     }
-    let name = match path.file_name().and_then(|n| n.to_str()) {
-        Some(n) => n,
-        None => return true,
-    };
-    let path_str = path.to_str().unwrap_or("");
-    for pattern in exclude_patterns {
-        if glob_match(pattern, name) || glob_match(pattern, path_str) {
-            return false;
+    // Gitignore-like: match pattern against each path component (segment). If any segment
+    // matches, exclude this path. So "target" excludes the dir target and everything under it.
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    for component in relative.components() {
+        let segment = component.as_os_str().to_str().unwrap_or("");
+        if segment.is_empty() {
+            continue;
+        }
+        for pattern in exclude_patterns {
+            if glob_match(pattern, segment) {
+                return false;
+            }
         }
     }
     true
