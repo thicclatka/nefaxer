@@ -6,8 +6,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use colored::Colorize;
+
 use crate::Diff;
-use crate::utils::Colors;
 use crate::utils::config::PackagePaths;
 
 /// Convert absolute path to relative path from base
@@ -213,14 +214,14 @@ pub fn canonicalize_paths(
 }
 
 macro_rules! write_diff_section {
-    ($out:expr, $paths:expr, $fmt:expr, $color:expr, $colorize:expr) => {
+    ($out:expr, $paths:expr, $fmt:expr, $color_method:ident, $colorize:expr) => {
         for p in $paths {
             let line = format!($fmt, p.display());
             let _ = writeln!(
                 $out,
                 "{}",
                 if $colorize {
-                    Colors::colorize($color, &line)
+                    format!("{}", line.$color_method())
                 } else {
                     line
                 }
@@ -231,9 +232,9 @@ macro_rules! write_diff_section {
 
 /// Write diff path list to `out`. If `colorize` is true, prefix/lines use ANSI colors (for stdout).
 fn write_diff_paths<W: std::io::Write>(out: &mut W, diff: &Diff, colorize: bool) {
-    write_diff_section!(out, &diff.added, "+ {}", Colors::ADDED, colorize);
-    write_diff_section!(out, &diff.removed, "- {}", Colors::REMOVED, colorize);
-    write_diff_section!(out, &diff.modified, "M {}", Colors::MODIFIED, colorize);
+    write_diff_section!(out, &diff.added, "+ {}", green, colorize);
+    write_diff_section!(out, &diff.removed, "- {}", red, colorize);
+    write_diff_section!(out, &diff.modified, "M {}", yellow, colorize);
 }
 
 /// Print diff summary (counts: Added / Removed / Modified). When list_paths is true, list each path
@@ -257,9 +258,9 @@ pub fn print_diff(diff: &Diff, dry_run: bool, list_paths: bool, output_dir: &Pat
 
     info!(
         "{} | {} | {}",
-        Colors::colorize(Colors::ADDED, &format!("Added: {}", added_count)),
-        Colors::colorize(Colors::REMOVED, &format!("Removed: {}", removed_count)),
-        Colors::colorize(Colors::MODIFIED, &format!("Modified: {}", modified_count))
+        format!("Added: {}", added_count).green(),
+        format!("Removed: {}", removed_count).red(),
+        format!("Modified: {}", modified_count).yellow()
     );
 
     if !list_paths {
