@@ -127,7 +127,7 @@ impl From<&NefaxOpts> for Opts {
 }
 
 /// Full options (CLI and check). Use [`NefaxOpts`] for lib.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct Opts {
     /// Index database path. When None, uses `root.join(<package index filename>)` (e.g. `.nefaxer`).
     pub db_path: Option<PathBuf>,

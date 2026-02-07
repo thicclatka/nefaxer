@@ -41,6 +41,7 @@ fn jwalk_iter(ctx: &PipelineContext) -> Box<dyn Iterator<Item = WalkOutcome>> {
     use std::time::Duration;
     Box::new(
         jwalk::WalkDir::new(&ctx.root)
+            .skip_hidden(false) // include dotfiles (e.g. .git); filtering is done in should_include_in_walk
             .follow_links(ctx.follow_links)
             .parallelism(Parallelism::RayonDefaultPool {
                 busy_timeout: Duration::from_secs(60),
