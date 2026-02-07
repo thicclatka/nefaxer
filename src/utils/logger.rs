@@ -25,13 +25,7 @@ pub fn setup_logging(verbose: bool) {
                         _ => unreachable!(),
                     };
                     let path = record.target().to_string().white();
-                    format!(
-                        "[{} {} {}] {}",
-                        name.cyan(),
-                        level_str,
-                        path,
-                        record.args()
-                    )
+                    format!("[{} {} {}] {}", name.cyan(), level_str, path, record.args())
                 }
                 _ => format!("[{}] {}", name.cyan(), record.args()),
             };
