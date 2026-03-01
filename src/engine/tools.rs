@@ -252,7 +252,7 @@ pub fn print_diff(diff: &Diff, dry_run: bool, list_paths: bool, output_dir: &Pat
     let total = added_count + removed_count + modified_count;
 
     if total == 0 {
-        warn!("No changes detected.");
+        info!("No changes detected.");
         return;
     }
 
