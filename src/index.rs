@@ -19,9 +19,9 @@ use crate::pipeline::{
 };
 use crate::utils::{get_passphrase, prepare_index_work_path, rename_temp_to_final};
 
-/// Build progress bar and callbacks for streaming index. Returns (bar, on_batch, on_received).
-/// For local drives: percentage bar + on_batch; path_count_rx is consumed in a background thread to set total.
-/// For network: counter bar + on_received; no total.
+/// Build progress bar and callbacks for streaming index. Returns (bar, `on_batch`, `on_received`).
+/// For local drives: percentage bar + `on_batch`; `path_count_rx` is consumed in a background thread to set total.
+/// For network: counter bar + `on_received`; no total.
 fn setup_progress(
     verbose: bool,
     is_network_drive: bool,
@@ -60,7 +60,7 @@ fn setup_progress(
     (bar, on_batch, on_received)
 }
 
-/// Join walk and workers, then push progress bar to 100% when index was up to date (local only). Returns path_count.
+/// Join walk and workers, then push progress bar to 100% when index was up to date (local only). Returns `path_count`.
 fn collect_pipeline_results(
     walk_handle: std::thread::JoinHandle<usize>,
     worker_handles: Vec<std::thread::JoinHandle<()>>,
@@ -83,7 +83,7 @@ fn collect_pipeline_results(
     Ok(path_count)
 }
 
-/// Convert public Nefax (path → PathMeta) to internal StoredMeta map for diff.
+/// Convert public Nefax (path → `PathMeta`) to internal `StoredMeta` map for diff.
 fn nefax_to_stored(existing: &crate::Nefax) -> HashMap<PathBuf, StoredMeta> {
     existing
         .iter()
@@ -91,7 +91,7 @@ fn nefax_to_stored(existing: &crate::Nefax) -> HashMap<PathBuf, StoredMeta> {
         .collect()
 }
 
-/// Lib path: run pipeline against in-memory conn, diff against existing (StoredMeta map). No DB file.
+/// Lib path: run pipeline against in-memory conn, diff against existing (`StoredMeta` map). No DB file.
 /// Pass a no-op (e.g. `|_| {}`) when not using the callback.
 fn run_lib_pipeline_with_callback<F>(
     root: &Path,
@@ -112,7 +112,7 @@ where
         ..
     } = run_pipeline(root, opts, None, None, &conn)?;
     let (diff, index_map) =
-        crate::check::diff_from_stream_with_callback(entry_rx, existing, root, opts, on_entry);
+        crate::check::diff_from_stream_with_callback(&entry_rx, existing, root, opts, on_entry);
     shutdown_pipeline_handles(walk_handle, worker_handles)?;
     check_for_initial_error_or_skipped_paths(opts, &first_error, &skipped_paths)?;
     engine::print_diff(&diff, false, opts.list_paths, root);
@@ -129,20 +129,17 @@ pub(crate) fn nefax_dir_callback<F>(
 where
     F: FnMut(&crate::Entry),
 {
-    let existing_stored = match existing {
-        Some(ex) => {
-            crate::validate_nefax(ex)?;
-            nefax_to_stored(ex)
-        }
-        None => {
-            let conn = engine::open_db_in_memory()?;
-            engine::load_index(&conn)?
-        }
+    let existing_stored = if let Some(ex) = existing {
+        crate::validate_nefax(ex)?;
+        nefax_to_stored(ex)
+    } else {
+        let conn = engine::open_db_in_memory()?;
+        engine::load_index(&conn)?
     };
     run_lib_pipeline_with_callback(root, opts, &existing_stored, on_entry)
 }
 
-/// Internal: full opts (CLI or lib). Non-callback path: handles both CLI (write_to_db) and lib (no DB). Returns `(nefax, diff)`.
+/// Internal: full opts (CLI or lib). Non-callback path: handles both CLI (`write_to_db`) and lib (no DB). Returns `(nefax, diff)`.
 ///
 /// # Arguments
 /// * `root` - Directory to index (walk root).
@@ -154,15 +151,12 @@ pub(crate) fn nefax_dir_with_opts(
     existing: Option<&crate::Nefax>,
 ) -> Result<(crate::Nefax, crate::Diff)> {
     if !opts.write_to_db {
-        let existing_stored = match existing {
-            Some(ex) => {
-                crate::validate_nefax(ex)?;
-                nefax_to_stored(ex)
-            }
-            None => {
-                let conn = engine::open_db_in_memory()?;
-                engine::load_index(&conn)?
-            }
+        let existing_stored = if let Some(ex) = existing {
+            crate::validate_nefax(ex)?;
+            nefax_to_stored(ex)
+        } else {
+            let conn = engine::open_db_in_memory()?;
+            engine::load_index(&conn)?
         };
         // Pass a no-op (e.g. `|_| {}`) when not using the callback.
         return run_lib_pipeline_with_callback(root, opts, &existing_stored, |_| {});
@@ -221,7 +215,7 @@ pub(crate) fn nefax_dir_with_opts(
         result_map: None, // CLI does not need the full index; lib uses write_to_db=false and diff_from_stream.
     };
 
-    let written = engine::apply_index_diff_streaming(&mut conn, entry_rx, &mut stream_params)?;
+    let written = engine::apply_index_diff_streaming(&mut conn, &entry_rx, &mut stream_params)?;
     let _path_count = collect_pipeline_results(
         walk_handle,
         worker_handles,
@@ -237,10 +231,10 @@ pub(crate) fn nefax_dir_with_opts(
 
     engine::check_for_cancel(&cancel_requested)?;
 
-    if !existing.is_empty() {
-        engine::print_diff(&index_diff, false, opts.list_paths, root);
-    } else {
+    if existing.is_empty() {
         info!("New nefaxer index created.");
+    } else {
+        engine::print_diff(&index_diff, false, opts.list_paths, root);
     }
 
     // CLI does not need the full index as return value; diff was built during streaming.

@@ -29,24 +29,29 @@ impl PackagePaths {
         })
     }
 
+    #[must_use]
     pub fn pkg_name(&self) -> &str {
         self.pkg_name
     }
 
+    #[must_use]
     pub fn output_filename(&self) -> &str {
         &self.db_filename
     }
 
+    #[must_use]
     pub fn probe_dir_name(&self) -> &str {
         &self.probe_dir_name
     }
 
+    #[must_use]
     pub fn results_filename(&self) -> &str {
         &self.results_filename
     }
 
     /// Filenames / dir names excluded from the walk by default. Does not include the index file
-    /// (output_filename); that is excluded via db_canonical in the walk.
+    /// (`output_filename`); that is excluded via `db_canonical` in the walk.
+    #[must_use]
     pub fn default_exclude_patterns(&self) -> Vec<String> {
         vec![
             self.probe_dir_name().to_string(),
@@ -93,6 +98,7 @@ impl WorkerThreadLimits {
 
     /// Build limits with `all_threads` set from `rayon::current_num_threads()`.
     /// Call this at runtime when you need the effective available thread count.
+    #[must_use]
     pub fn current() -> Self {
         Self {
             all_threads: rayon::current_num_threads(),
@@ -109,7 +115,7 @@ pub struct ProgressConsts;
 impl ProgressConsts {
     /// Batch size for progress bar updates during directory walk (reduce lock contention).
     pub const PROGRESS_UPDATE_BATCH_SIZE: usize = 100;
-    /// Target number of progress updates across all workers in read_metadata (~100 total).
+    /// Target number of progress updates across all workers in `read_metadata` (~100 total).
     pub const ADAPTIVE_PROGRESS_TARGET_UPDATES: usize = 100;
     /// Minimum chunk size for adaptive progress (avoid too-frequent updates).
     pub const ADAPTIVE_CHUNK_MIN: usize = 10;
@@ -159,5 +165,5 @@ impl StreamingChannelCap {
 
 // ---- Diff / list output ----
 
-/// When --list is set, if total changes (added+removed+modified) exceed this, write paths to RESULTS_FILENAME instead of stdout.
+/// When --list is set, if total changes (added+removed+modified) exceed this, write paths to `RESULTS_FILENAME` instead of stdout.
 pub const LIST_THRESHOLD: usize = 100;

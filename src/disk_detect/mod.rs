@@ -34,6 +34,7 @@ pub enum DriveType {
 
 impl DriveType {
     /// Get optimal worker thread count for this drive type
+    #[must_use]
     pub fn worker_threads(&self, available_threads: usize) -> usize {
         let limits = WorkerThreadLimits::default();
         match self {
@@ -44,20 +45,24 @@ impl DriveType {
         }
     }
 
+    #[must_use]
     pub fn is_hdd(&self) -> bool {
         matches!(self, DriveType::HDD)
     }
 
     #[allow(dead_code)]
+    #[must_use]
     pub fn is_ssd(&self) -> bool {
         matches!(self, DriveType::SSD)
     }
 
+    #[must_use]
     pub fn is_network(&self) -> bool {
         matches!(self, DriveType::Network)
     }
 
     /// Parse cached disk-type string (e.g. "Network+HDD", "Network+SSD") for probe results.
+    #[must_use]
     pub fn from_disk_type_str(s: &str) -> Self {
         if s.contains("HDD") {
             DriveType::HDD
@@ -70,6 +75,7 @@ impl DriveType {
 }
 
 /// Detect drive type for the given path (public for callers that need drive type only).
+#[must_use]
 pub fn drive_type_for_path(path: &Path) -> DriveType {
     detect_drive_type(path)
 }
@@ -98,6 +104,7 @@ fn detect_drive_type(path: &Path) -> DriveType {
 }
 
 /// Channel cap for path/entry channels by drive type (used when no stored path count in diskinfo).
+#[must_use]
 pub fn channel_cap_for_drive(drive_type: DriveType) -> usize {
     use crate::utils::config::StreamingChannelCap;
     match drive_type {
@@ -117,6 +124,7 @@ pub fn channel_cap_for_drive(drive_type: DriveType) -> usize {
 /// Return value: worker count (FD limit applied), drive type (SSD/HDD/Network/Unknown), and
 /// `use_parallel_walk` (`true` for jwalk, `false` for walkdir). `thread_override` forces the
 /// thread count (still capped by FD limit).
+#[must_use]
 pub fn determine_threads_for_drive(
     path: &Path,
     conn: Option<&Connection>,
@@ -137,10 +145,7 @@ pub fn determine_threads_for_drive(
         determine_threads_given_fd_limit(thread_override.unwrap_or(num_threads));
 
     if drive_type != DriveType::Network {
-        debug!(
-            "Drive type: {:?}, using {} threads",
-            drive_type, num_threads_to_use
-        );
+        debug!("Drive type: {drive_type:?}, using {num_threads_to_use} threads");
     }
 
     (num_threads_to_use, drive_type, use_parallel_walk)

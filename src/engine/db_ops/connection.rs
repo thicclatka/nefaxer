@@ -16,16 +16,20 @@ fn apply_wal_and_schema(conn: &Connection, db_path: Option<&Path>) -> Result<()>
         .map(|p| format!(" at {}", p.display()))
         .unwrap_or_default();
     conn.query_row("PRAGMA journal_mode = WAL", [], |_| Ok(()))
-        .with_context(|| format!("enable WAL{}", path_ctx))?;
+        .with_context(|| format!("enable WAL{path_ctx}"))?;
     conn.execute_batch(WAL_PRAGMAS)
-        .with_context(|| format!("set WAL pragmas{}", path_ctx))?;
+        .with_context(|| format!("set WAL pragmas{path_ctx}"))?;
     conn.execute_batch(SCHEMA)
-        .with_context(|| format!("create schema{}", path_ctx))?;
+        .with_context(|| format!("create schema{path_ctx}"))?;
     Ok(())
 }
 
 /// Open or create the index DB and ensure schema + WAL with optimizations.
-/// If `passphrase` is Some, set SQLCipher PRAGMA key before any other operations.
+/// If `passphrase` is Some, set `SQLCipher` PRAGMA key before any other operations.
+///
+/// # Errors
+///
+/// Returns [`anyhow::Error`] when `SQLite` open fails, the key cannot be set, or schema/WAL setup fails.
 pub fn open_db(path: &Path, passphrase: Option<&str>) -> Result<Connection> {
     let conn =
         Connection::open(path).with_context(|| format!("open database at {}", path.display()))?;
@@ -40,7 +44,12 @@ pub fn open_db(path: &Path, passphrase: Option<&str>) -> Result<Connection> {
 }
 
 /// Open existing DB, detecting if it is encrypted: try without key first; if read fails, load
-/// passphrase (env → .env in dir → prompt) and open with key. Returns (connection, passphrase_used).
+/// passphrase (env → .env in dir → prompt) and open with key. Returns (connection, `passphrase_used`).
+///
+/// # Errors
+///
+/// Returns [`anyhow::Error`] when opening the database fails, passphrase loading fails, or
+/// [`open_db`] fails after decryption.
 pub fn open_db_or_detect_encrypted(
     path: &Path,
     dir: &Path,
@@ -58,6 +67,10 @@ pub fn open_db_or_detect_encrypted(
 }
 
 /// Open an in-memory DB with the same schema (for small-index path; no WAL pragmas needed).
+///
+/// # Errors
+///
+/// Returns [`anyhow::Error`] when `SQLite` cannot create the in-memory connection or apply the schema.
 pub fn open_db_in_memory() -> Result<Connection> {
     let conn = Connection::open_in_memory().context("open in-memory database")?;
     conn.execute_batch(SCHEMA).context("create schema")?;
@@ -71,7 +84,11 @@ pub fn path_count_from_db(conn: &Connection) -> Option<usize> {
         .map(|n| n.max(0) as usize)
 }
 
-/// Load existing index from DB into a map: path -> (mtime_ns, size, hash).
+/// Load existing index from DB into a map: path -> (`mtime_ns`, size, hash).
+///
+/// # Errors
+///
+/// Returns [`anyhow::Error`] when preparing or executing the query, or reading a row fails.
 pub fn load_index(conn: &Connection) -> Result<HashMap<PathBuf, StoredMeta>> {
     let mut stmt = conn
         .prepare("SELECT path, mtime_ns, size, hash FROM paths")

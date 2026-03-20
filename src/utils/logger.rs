@@ -29,7 +29,7 @@ pub fn setup_logging(verbose: bool) {
                 }
                 _ => format!("[{}] {}", name.cyan(), record.args()),
             };
-            writeln!(buf, "{}", line)
+            writeln!(buf, "{line}")
         })
         .init();
 }

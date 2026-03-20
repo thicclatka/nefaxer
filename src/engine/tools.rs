@@ -12,11 +12,13 @@ use crate::Diff;
 use crate::utils::config::PackagePaths;
 
 /// Convert absolute path to relative path from base
+#[must_use]
 pub fn path_relative_to(path: &Path, base: &Path) -> Option<PathBuf> {
     path.strip_prefix(base).ok().map(|p| p.to_path_buf())
 }
 
 /// Normalize path for DB storage: forward slashes only. Makes DB portable across Windows/Unix.
+#[must_use]
 pub fn path_to_db_string(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
@@ -39,20 +41,19 @@ pub fn path_to_long_path(path: &Path) -> PathBuf {
 
 /// On Unix: no-op (long-path prefix is Windows-only).
 #[cfg(not(windows))]
+#[must_use]
 pub fn path_to_long_path(path: &Path) -> PathBuf {
     path.to_path_buf()
 }
 
 /// Check if a file should be excluded based on OS-specific hidden files
+#[must_use]
 pub fn is_os_hidden_file(path: &Path) -> bool {
     if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
         match name {
-            // macOS
-            ".DS_Store" | ".AppleDouble" | ".LSOverride" | "._*" => true,
-            // Windows
-            "Thumbs.db" | "ehthumbs.db" | "Desktop.ini" | "$RECYCLE.BIN" => true,
-            // Linux
-            ".directory" | ".Trash-*" => true,
+            // macOS / Windows / Linux hidden or junk file names
+            ".DS_Store" | ".AppleDouble" | ".LSOverride" | "._*" | "Thumbs.db" | "ehthumbs.db"
+            | "Desktop.ini" | "$RECYCLE.BIN" | ".directory" | ".Trash-*" => true,
             _ => {
                 // macOS resource fork files start with ._
                 name.starts_with("._")
@@ -64,6 +65,7 @@ pub fn is_os_hidden_file(path: &Path) -> bool {
 }
 
 /// Returns true if the path should be included in the walk (not excluded).
+#[must_use]
 pub fn should_include_in_walk(
     path: &Path,
     root: &Path,
@@ -108,6 +110,7 @@ pub fn should_include_in_walk(
 }
 
 /// Simple glob pattern matching (supports * and ?)
+#[must_use]
 pub fn glob_match(pattern: &str, text: &str) -> bool {
     // Remove leading '!' if present (negation handled by caller)
     let pattern = pattern.strip_prefix('!').unwrap_or(pattern);
@@ -154,6 +157,7 @@ pub fn glob_match(pattern: &str, text: &str) -> bool {
 }
 
 /// Check if mtime has changed beyond tolerance window
+#[must_use]
 pub fn mtime_changed(new_mtime: i64, old_mtime: i64, tolerance_ns: i64) -> bool {
     let mtime_diff = (new_mtime - old_mtime).abs();
     mtime_diff > tolerance_ns
@@ -180,6 +184,7 @@ fn check_for_root(_path: &Path) -> Result<(), anyhow::Error> {
 
 /// True if the process is running with effective uid 0 (e.g. via sudo).
 #[cfg(unix)]
+#[must_use]
 pub fn running_as_root() -> bool {
     unsafe { libc::geteuid() == 0 }
 }
@@ -189,6 +194,11 @@ pub fn running_as_root() -> bool {
     false
 }
 
+/// Canonicalize `path` (long-path form on Windows) and reject root-owned directories on Unix.
+///
+/// # Errors
+///
+/// Returns [`anyhow::Error`] when canonicalization fails or the root-owned check fails on Unix.
 pub fn check_root_and_canonicalize(path: &Path) -> Result<PathBuf> {
     let path = path_to_long_path(path);
     let path = path
@@ -198,6 +208,11 @@ pub fn check_root_and_canonicalize(path: &Path) -> Result<PathBuf> {
     Ok(path)
 }
 
+/// Canonicalize `root` and optional DB/temp paths for pipeline use.
+///
+/// # Errors
+///
+/// Returns [`anyhow::Error`] when [`check_root_and_canonicalize`] fails for `root`.
 pub fn canonicalize_paths(
     root: &Path,
     db_path: Option<&Path>,
@@ -237,14 +252,14 @@ fn write_diff_paths<W: std::io::Write>(out: &mut W, diff: &Diff, colorize: bool)
     write_diff_section!(out, &diff.modified, "M {}", yellow, colorize);
 }
 
-/// Print diff summary (counts: Added / Removed / Modified). When list_paths is true, list each path
-/// to stdout if total <= LIST_THRESHOLD, otherwise write to output_dir / PackagePaths::results_filename().
+/// Print diff summary (counts: Added / Removed / Modified). When `list_paths` is true, list each path
+/// to stdout if total <= `LIST_THRESHOLD`, otherwise write to `output_dir` / `PackagePaths::results_filename()`.
 pub fn print_diff(diff: &Diff, dry_run: bool, list_paths: bool, output_dir: &Path) {
     let msg = format!(
         "Nefaxing {} results:",
         if dry_run { "dry-run" } else { "index" }
     );
-    info!("{}", msg);
+    info!("{msg}");
 
     let added_count = diff.added.len();
     let removed_count = diff.removed.len();
@@ -258,9 +273,9 @@ pub fn print_diff(diff: &Diff, dry_run: bool, list_paths: bool, output_dir: &Pat
 
     info!(
         "{} | {} | {}",
-        format!("Added: {}", added_count).green(),
-        format!("Removed: {}", removed_count).red(),
-        format!("Modified: {}", modified_count).yellow()
+        format!("Added: {added_count}").green(),
+        format!("Removed: {removed_count}").red(),
+        format!("Modified: {modified_count}").yellow()
     );
 
     if !list_paths {
@@ -285,15 +300,21 @@ pub fn print_diff(diff: &Diff, dry_run: bool, list_paths: bool, output_dir: &Pat
     }
 }
 
-/// Create the database path from the root and db_path options.
-/// If db_path is None, use `root.join(<package index filename>)` (e.g. `.nefaxer`).
+/// Create the database path from the root and `db_path` options.
+/// If `db_path` is None, use `root.join(<package index filename>)` (e.g. `.nefaxer`).
+#[must_use]
 pub fn create_db_path(root: &Path, db_path: Option<&Path>) -> PathBuf {
-    db_path
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| root.join(PackagePaths::get().output_filename()))
+    db_path.map_or_else(
+        || root.join(PackagePaths::get().output_filename()),
+        |p| p.to_path_buf(),
+    )
 }
 
 /// Setup Ctrl+C handler and return a shared boolean indicating if the user has requested cancellation.
+///
+/// # Errors
+///
+/// Returns [`anyhow::Error`] when the global Ctrl+C handler cannot be installed.
 pub fn setup_ctrlc_handler() -> Result<Arc<AtomicBool>> {
     let cancel_requested = Arc::new(AtomicBool::new(false));
     let cancel_requested_handler = Arc::clone(&cancel_requested);
@@ -306,6 +327,10 @@ pub fn setup_ctrlc_handler() -> Result<Arc<AtomicBool>> {
 }
 
 /// Return an error if the user requested cancellation (e.g. after indexing; partial index may have been flushed).
+///
+/// # Errors
+///
+/// Returns [`anyhow::Error`] when cancellation was requested.
 pub fn check_for_cancel(cancel_requested: &Arc<AtomicBool>) -> Result<()> {
     if cancel_requested.load(Ordering::Relaxed) {
         anyhow::bail!("Nefaxing cancelled by user; partial index was flushed");

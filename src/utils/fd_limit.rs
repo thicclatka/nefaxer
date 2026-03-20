@@ -5,12 +5,10 @@ use log::debug;
 /// Estimated number of file descriptors used per walk worker (dir handles, files, etc.).
 pub const FDS_PER_WORKER: usize = 10;
 
-/// Fraction of the process FD limit to use (leave headroom for other code).
-const FD_LIMIT_FRACTION: f64 = 0.8;
-
 /// Returns the soft limit for max open file descriptors, or `None` if unavailable (e.g. Windows).
 /// Used to cap walk parallelism so we don't hit EMFILE.
 #[cfg(unix)]
+#[must_use]
 pub fn max_open_fds() -> Option<u64> {
     use std::mem::MaybeUninit;
     let mut rlim = MaybeUninit::<libc::rlimit>::uninit();
@@ -33,22 +31,22 @@ pub fn max_open_fds() -> Option<u64> {
 
 /// Suggested max parallelism (thread count) so we stay under ~80% of the FD limit.
 /// Returns `None` if no limit is available (use caller's default).
+#[must_use]
 pub fn max_workers_by_fd_limit() -> Option<usize> {
     let limit = max_open_fds()?;
-    let usable = (limit as f64 * FD_LIMIT_FRACTION) as usize;
+    // 80% of limit, integer math (avoids u64→f64 precision loss; matches prior float intent).
+    let usable = (limit.saturating_mul(80) / 100) as usize;
     if usable < FDS_PER_WORKER {
         return Some(1);
     }
     Some(usable / FDS_PER_WORKER)
 }
 
+#[must_use]
 pub fn determine_threads_given_fd_limit(num_threads: usize) -> usize {
     match max_workers_by_fd_limit() {
         Some(fd_cap) if fd_cap < num_threads => {
-            debug!(
-                "Capping threads {} -> {} (FD limit ~80%)",
-                num_threads, fd_cap
-            );
+            debug!("Capping threads {num_threads} -> {fd_cap} (FD limit ~80%)");
             fd_cap
         }
         _ => num_threads,

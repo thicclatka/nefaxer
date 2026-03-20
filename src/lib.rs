@@ -24,6 +24,11 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// - **`on_entry: Some(f)`** → callback path (streaming). Lib-only; `f` is invoked for each entry as it's ready. Keep it fast or send to a channel.
 ///
 /// Pass `existing: None` for a fresh index (diff will be all added); `Some(&nefax)` to diff against a previous snapshot (e.g. loaded from your own DB).
+///
+/// # Errors
+///
+/// Returns [`crate::Error`] when [`validate_nefax`] fails on `existing`, or indexing / diffing fails
+/// (I/O, `SQLite`, pipeline, cancellation, etc.).
 pub fn nefax_dir<F>(
     root: &Path,
     opts: &NefaxOpts,
@@ -39,7 +44,7 @@ where
         env!("CARGO_PKG_NAME").to_string().to_uppercase(),
         opts
     );
-    debug!("{}", config_str);
+    debug!("{config_str}");
 
     match on_entry {
         None => index::nefax_dir_with_opts(root, &opts, existing),

@@ -12,6 +12,10 @@ use crate::utils::config::{StreamingChannelCap, WorkerThreadLimits};
 
 /// Start the walk + metadata pipeline. Returns receiver and handles; caller receives from
 /// `entry_rx` and must join `walk_handle` and `worker_handles` when done.
+///
+/// # Errors
+///
+/// Returns [`anyhow::Error`] when [`setup_pipeline_root_and_tuning`] fails.
 pub fn run_pipeline(
     root: &Path,
     opts: &Opts,
@@ -38,7 +42,7 @@ pub fn run_pipeline(
     );
 
     let worker_handles = pipeline::spawn_metadata_workers(
-        channels.path_rx,
+        &channels.path_rx,
         &channels.entry_tx,
         &root,
         tuning.num_threads,
@@ -60,6 +64,10 @@ pub fn run_pipeline(
 
 /// Shut down the pipeline by joining walk and worker threads (after stream is drained).
 /// Use when you've consumed `entry_rx` and only need to wait for threads to exit; no progress bar.
+///
+/// # Errors
+///
+/// Returns [`anyhow::Error`] when the walk thread panicked.
 pub fn shutdown_pipeline_handles(
     walk_handle: std::thread::JoinHandle<usize>,
     worker_handles: Vec<std::thread::JoinHandle<()>>,
@@ -74,6 +82,10 @@ pub fn shutdown_pipeline_handles(
 }
 
 /// Canonicalize root and paths, detect drive type, compute thread count.
+///
+/// # Errors
+///
+/// Returns [`anyhow::Error`] when [`canonicalize_paths`](crate::engine::tools::canonicalize_paths) fails.
 pub fn setup_pipeline_root_and_tuning(
     root: &Path,
     opts: &Opts,
@@ -97,15 +109,17 @@ pub fn setup_pipeline_root_and_tuning(
 
     // Channel cap: if .nefaxer exists, get path count from DB (fast COUNT(*)); else drive-type default.
     let stored_count = path_count_from_db(conn).filter(|&n| n > 0);
-    let channel_cap = stored_count
-        .map(|n| (n + StreamingChannelCap::MARGIN).min(StreamingChannelCap::MAX))
-        .unwrap_or_else(|| channel_cap_for_drive(drive_type));
+    let channel_cap = stored_count.map_or_else(
+        || channel_cap_for_drive(drive_type),
+        |n| (n + StreamingChannelCap::MARGIN).min(StreamingChannelCap::MAX),
+    );
     log::debug!(
         "Streaming cap set to {} ({})",
         channel_cap,
-        stored_count
-            .map(|n| format!("{} paths from index", n))
-            .unwrap_or_else(|| format!("drive default {:?}", drive_type))
+        stored_count.map_or_else(
+            || format!("drive default {drive_type:?}"),
+            |n| format!("{n} paths from index")
+        )
     );
     parallel_walk_handler(parallel_walk);
 
@@ -119,8 +133,13 @@ pub fn setup_pipeline_root_and_tuning(
 }
 
 /// Main orchestrator: Collect all entries under `root` via streaming pipeline.
-/// Returns (entries, path_count). No progress bar here so kdam never blocks the pipeline; caller may create one for Phase 3 using path_count.
+/// Returns (entries, `path_count`). No progress bar here so kdam never blocks the pipeline; caller may create one for Phase 3 using `path_count`.
 /// Walk → path channel → workers (metadata) → entry channel → Vec.
+///
+/// # Errors
+///
+/// Returns [`anyhow::Error`] when [`run_pipeline`] fails, the walk thread panics, or
+/// [`check_for_initial_error_or_skipped_paths`] reports an error in strict mode.
 pub fn collect_entries(
     root: &Path,
     opts: &Opts,

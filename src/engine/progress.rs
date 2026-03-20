@@ -27,6 +27,7 @@ pub struct ProgressBarConfig {
 
 impl ProgressBarConfig {
     /// Create a new progress bar configuration
+    #[must_use]
     pub fn new(total: usize, desc: &'static str, animation: Animation) -> Self {
         Self {
             total,
@@ -37,6 +38,7 @@ impl ProgressBarConfig {
 }
 
 /// Create a progress bar with the given configuration
+#[must_use]
 pub fn create_progress_bar(config: ProgressBarConfig) -> Arc<Mutex<Bar>> {
     Arc::new(Mutex::new(kdam::tqdm!(
         total = config.total,
@@ -46,6 +48,7 @@ pub fn create_progress_bar(config: ProgressBarConfig) -> Arc<Mutex<Bar>> {
 }
 
 /// Create a counter for unknown total (shows count without percentage)
+#[must_use]
 pub fn create_counter(desc: &'static str) -> Arc<Mutex<Bar>> {
     Arc::new(Mutex::new(kdam::tqdm!(
         total = 0,
@@ -57,7 +60,7 @@ pub fn create_counter(desc: &'static str) -> Arc<Mutex<Bar>> {
 }
 
 /// Update progress bar if available
-/// Uses try_lock to avoid blocking if mutex is contended (non-blocking)
+/// Uses `try_lock` to avoid blocking if mutex is contended (non-blocking)
 pub fn update_progress_bar(pb: &Arc<Mutex<Bar>>, n: usize) {
     // Use try_lock to avoid blocking parallel workers
     // If lock is contended, skip update (progress bar will catch up on next update)
@@ -69,7 +72,7 @@ pub fn update_progress_bar(pb: &Arc<Mutex<Bar>>, n: usize) {
 // Progress bar type alias
 pub type ProgressBar = Arc<std::sync::Mutex<Bar>>;
 
-/// (bar, on_batch, on_received) from setup_progress for streaming index.
+/// (bar, `on_batch`, `on_received`) from `setup_progress` for streaming index.
 pub type ProgressSetup = (
     Option<ProgressBar>,
     Option<Box<dyn Fn(usize) + Send>>,
@@ -77,6 +80,7 @@ pub type ProgressSetup = (
 );
 
 /// Create a progress callback function that updates the progress bar.
+#[must_use]
 pub fn progress_callback(bar: &Option<ProgressBar>) -> Option<Box<dyn Fn(usize) + Send>> {
     bar.as_ref().map(|bar| {
         let bar = Arc::clone(bar);
@@ -85,6 +89,7 @@ pub fn progress_callback(bar: &Option<ProgressBar>) -> Option<Box<dyn Fn(usize) 
 }
 
 /// Create a callback function that updates the progress bar on batch completion.
+#[must_use]
 pub fn on_batch_callback(
     is_network_drive: bool,
     bar: &Option<ProgressBar>,
@@ -97,6 +102,7 @@ pub fn on_batch_callback(
 }
 
 /// Create a callback function that updates the progress bar on received completion.
+#[must_use]
 pub fn on_received_callback(
     is_network_drive: bool,
     bar: &Option<ProgressBar>,
@@ -110,7 +116,7 @@ pub fn on_received_callback(
 
 /// Macro to execute a function and update progress bar
 /// Usage: `with_progress!(pb, function_call(...))`
-/// Optimized: only calls update_progress_bar if pb is Some
+/// Optimized: only calls `update_progress_bar` if pb is Some
 #[macro_export]
 macro_rules! with_progress {
     ($pb:expr, $func:expr) => {{

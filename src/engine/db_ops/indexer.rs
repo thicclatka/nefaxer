@@ -1,4 +1,4 @@
-//! Index diff: apply_index_diff_streaming (stream entries to DB with one writer).
+//! Index diff: `apply_index_diff_streaming` (stream entries to DB with one writer).
 
 use anyhow::{Context, Result};
 use crossbeam_channel::Receiver;
@@ -16,7 +16,8 @@ use crate::{Diff, Entry};
 
 use super::{INSERT_PATH_SQL, StoredMeta};
 
-/// True if the entry is new or its mtime/size/hash differ from existing (within mtime_window_ns).
+/// True if the entry is new or its mtime/size/hash differ from existing (within `mtime_window_ns`).
+#[must_use]
 pub fn entry_needs_update(
     entry: &Entry,
     existing: &HashMap<PathBuf, StoredMeta>,
@@ -50,7 +51,7 @@ fn delete_removed_paths(
     Ok(())
 }
 
-/// Execute one path insert for an entry (used by flush_batch).
+/// Execute one path insert for an entry (used by `flush_batch`).
 fn execute_insert_entry(stmt: &mut Statement<'_>, e: &Entry) -> Result<()> {
     stmt.execute((
         path_to_db_string(&e.path).as_str(),
@@ -62,7 +63,7 @@ fn execute_insert_entry(stmt: &mut Statement<'_>, e: &Entry) -> Result<()> {
     Ok(())
 }
 
-/// Insert a batch of entries in a single transaction and optionally call on_batch_progress(batch.len()). Returns batch length.
+/// Insert a batch of entries in a single transaction and optionally call `on_batch_progress(batch.len())`. Returns batch length.
 fn flush_batch(
     conn: &mut Connection,
     batch: &[Entry],
@@ -94,14 +95,18 @@ pub struct ApplyIndexDiffStreamingParams<'a> {
     pub cancel_check: Option<Arc<AtomicBool>>,
     /// When set, accumulate added/removed/modified for a summary after indexing (index must have existed).
     pub diff: Option<&'a mut Diff>,
-    /// When set, build the current index map incrementally (path → StoredMeta) so caller gets it without a second load_index.
+    /// When set, build the current index map incrementally (path → `StoredMeta`) so caller gets it without a second `load_index`.
     pub result_map: Option<&'a mut HashMap<PathBuf, StoredMeta>>,
 }
 
 /// Write entries to DB as they are received (streaming). Tracks current paths for deletes at end.
+///
+/// # Errors
+///
+/// Returns [`anyhow::Error`] when receiving entries or writing batches to `SQLite` fails.
 pub fn apply_index_diff_streaming(
     conn: &mut Connection,
-    entry_rx: Receiver<Entry>,
+    entry_rx: &Receiver<Entry>,
     params: &mut ApplyIndexDiffStreamingParams<'_>,
 ) -> Result<usize> {
     let mut current_paths = HashSet::new();

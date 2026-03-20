@@ -42,7 +42,7 @@ pub struct Diff {
 /// pass it as `existing`. Use [`validate_nefax`] before passing as `existing` to ensure the map fits (paths relative, etc.).
 pub type Nefax = HashMap<PathBuf, PathMeta>;
 
-/// Plausible mtime_ns range: pre-1970 to ~year 2242. Rejects obvious corruption (e.g. negative overflow or garbage).
+/// Plausible `mtime_ns` range: pre-1970 to ~year 2242. Rejects obvious corruption (e.g. negative overflow or garbage).
 const MTIME_NS_MIN: i64 = -1_000_000_000_000_000_000; // ~year 1680
 const MTIME_NS_MAX: i64 = 4_611_686_018_427_387_903; // ~year 2242 in ns since epoch
 /// Max file size (1 exabyte). Rejects overflow/corruption sentinels.
@@ -50,6 +50,10 @@ const SIZE_MAX: u64 = 1_000_000_000_000_000_000;
 
 /// Validates that a [`Nefax`] map is suitable for use as `existing` in [`nefax_dir`](crate::nefax_dir).
 /// Single pass: paths must be relative and non-empty; [`PathMeta`] fields must be in plausible ranges (rejects corrupted data).
+///
+/// # Errors
+///
+/// Returns [`anyhow::Error`] when a path is absolute or empty, or `mtime_ns` / `size` are out of range.
 pub fn validate_nefax(nefax: &Nefax) -> Result<()> {
     for (path, meta) in nefax {
         if path.as_path().is_absolute() {
@@ -133,9 +137,9 @@ pub struct Opts {
     pub db_path: Option<PathBuf>,
     /// Override worker thread count. When None, derived from drive type and FD limit.
     pub num_threads: Option<usize>,
-    /// When set with num_threads and use_parallel_walk, skip disk detection (e.g. lib caller passed result of [`tuning_for_path`](crate::tuning_for_path) or [`determine_threads_for_drive`](crate::disk_detect::determine_threads_for_drive)).
+    /// When set with `num_threads` and `use_parallel_walk`, skip disk detection (e.g. lib caller passed result of [`tuning_for_path`](crate::tuning_for_path) or [`determine_threads_for_drive`](crate::disk_detect::determine_threads_for_drive)).
     pub drive_type: Option<crate::disk_detect::DriveType>,
-    /// Use parallel walk (jwalk). When set with num_threads and drive_type, skip disk detection.
+    /// Use parallel walk (jwalk). When set with `num_threads` and `drive_type`, skip disk detection.
     pub use_parallel_walk: Option<bool>,
     /// Compute blake3 hash for files (slower but accurate change detection).
     pub with_hash: bool,
@@ -151,9 +155,9 @@ pub struct Opts {
     pub strict: bool,
     /// Paranoid mode (check): re-hash when hash matches but mtime/size differ.
     pub paranoid: bool,
-    /// Encrypt the index database with SQLCipher.
+    /// Encrypt the index database with `SQLCipher`.
     pub encrypt: bool,
-    /// List each changed path (added/removed/modified). If total > LIST_THRESHOLD, write to nefaxer.results instead of stdout.
+    /// List each changed path (added/removed/modified). If total > `LIST_THRESHOLD`, write to nefaxer.results instead of stdout.
     pub list_paths: bool,
     /// When true, write index to DB (CLI). When false, run pipeline and return diff only (lib).
     pub write_to_db: bool,
