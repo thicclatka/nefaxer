@@ -31,7 +31,7 @@ fn setup_opts(cli: &Cli) -> Opts {
     apply_cli_opt!(cli, opts, check_hash => with_hash);
     apply_cli_opt!(cli, opts, follow_links => follow_links);
     if !cli.exclude.is_empty() {
-        opts.exclude = cli.exclude.clone();
+        opts.exclude.clone_from(&cli.exclude);
     }
     apply_cli_opt!(cli, opts, verbose => verbose);
     if let Some(secs) = cli.mtime_window {
@@ -46,7 +46,12 @@ fn setup_opts(cli: &Cli) -> Opts {
     opts
 }
 
-/// Run index (default) or compare-only when --dry-run. Does not write to index when dry_run.
+/// Run index (default) or compare-only when --dry-run. Does not write to index when `dry_run`.
+///
+/// # Errors
+///
+/// Returns [`crate::Error`] from [`crate::check::check_dir`] (dry-run) or
+/// [`crate::index::nefax_dir_with_opts`] (index).
 pub fn handle_run(cli: &Cli) -> Result<()> {
     let opts = setup_opts(cli);
     if running_as_root() && !opts.encrypt {

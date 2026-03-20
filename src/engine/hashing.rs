@@ -14,6 +14,10 @@ use crate::utils::config::HashingConsts;
 use crate::utils::config::SMALL_FILE_THRESHOLD;
 
 /// Hash a file with blake3. Uses memory-mapped I/O for files above threshold, chunked reading otherwise.
+///
+/// # Errors
+///
+/// Returns [`anyhow::Error`] when opening or reading the file, or memory-mapping fails.
 pub fn hash_file(path: &Path, size: u64) -> Result<Option<[u8; 32]>> {
     let file = File::open(path)?;
     let mut hasher = Hasher::new();
@@ -41,6 +45,7 @@ pub fn hash_file(path: &Path, size: u64) -> Result<Option<[u8; 32]>> {
 }
 
 /// Compare two hash options for equality
+#[must_use]
 pub fn hash_equals(hash1: &Option<[u8; 32]>, hash2: &Option<Vec<u8>>) -> bool {
     match (hash1, hash2) {
         (None, None) => true,
@@ -49,7 +54,7 @@ pub fn hash_equals(hash1: &Option<[u8; 32]>, hash2: &Option<Vec<u8>>) -> bool {
     }
 }
 
-/// When opts.with_hash and size >= threshold: reuse index hash if mtime+size match, else hash file.
+/// When `opts.with_hash` and size >= threshold: reuse index hash if mtime+size match, else hash file.
 pub fn fill_entry_hash_if_needed(
     entry: &mut Entry,
     index: &HashMap<PathBuf, StoredMeta>,

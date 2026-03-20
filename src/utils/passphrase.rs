@@ -1,4 +1,4 @@
-//! Passphrase loading for SQLCipher: env var → .env in dir → secure prompt.
+//! Passphrase loading for `SQLCipher`: env var → .env in dir → secure prompt.
 
 use anyhow::{Context, Result};
 use colored::Colorize;
@@ -27,8 +27,12 @@ fn try_env_then_dotenv(dir: &Path) -> Option<String> {
     None
 }
 
-/// Read passphrase: env (NEFAXER_DB_KEY) → .env in `dir` → secure prompt.
+/// Read passphrase: env (`NEFAXER_DB_KEY`) → .env in `dir` → secure prompt.
 /// `is_new`: true for creating a new encrypted index (prompt says "New ...", reminds to note it down).
+///
+/// # Errors
+///
+/// Returns [`anyhow::Error`] when reading the password from the terminal fails.
 pub fn get_passphrase(dir: &Path, is_new: bool) -> Result<String> {
     info!("Encryption mode (either flag was provided or encrypted index was detected)");
     if let Some(s) = try_env_then_dotenv(dir) {
@@ -42,7 +46,7 @@ pub fn get_passphrase(dir: &Path, is_new: bool) -> Result<String> {
         "Enter passphrase: "
     };
     let pass =
-        rpassword::prompt_password(format!("{} {}", label, prompt)).context("read passphrase")?;
+        rpassword::prompt_password(format!("{label} {prompt}")).context("read passphrase")?;
     if is_new {
         warn!("Lost passphrase = lost access");
     }

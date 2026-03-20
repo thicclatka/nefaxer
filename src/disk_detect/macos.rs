@@ -33,7 +33,7 @@ pub fn detect(path: &Path) -> DriveType {
     let disks = Disks::new_with_refreshed_list();
 
     debug!("Available disks:");
-    for d in disks.iter() {
+    for d in &disks {
         debug!(
             "  mount={}, fs={}, kind={:?}",
             d.mount_point().display(),
@@ -52,33 +52,30 @@ pub fn detect(path: &Path) -> DriveType {
         })
         .max_by_key(|d| d.mount_point().to_string_lossy().len());
 
-    match disk {
-        Some(disk) => {
-            let fs_type = disk.file_system().to_string_lossy();
+    if let Some(disk) = disk {
+        let fs_type = disk.file_system().to_string_lossy();
 
-            debug!(
-                "Disk detection: path={}, mount={}, fs_type={}, kind={:?}",
-                path.display(),
-                disk.mount_point().display(),
-                fs_type,
-                disk.kind()
-            );
+        debug!(
+            "Disk detection: path={}, mount={}, fs_type={}, kind={:?}",
+            path.display(),
+            disk.mount_point().display(),
+            fs_type,
+            disk.kind()
+        );
 
-            if is_network_fs(&fs_type) {
-                debug!("Detected network filesystem");
-                return DriveType::Network;
-            }
-
-            // Use sysinfo's disk type detection
-            match disk.kind() {
-                sysinfo::DiskKind::HDD => DriveType::HDD,
-                sysinfo::DiskKind::SSD => DriveType::SSD,
-                sysinfo::DiskKind::Unknown(_) => DriveType::SSD, // Default to SSD
-            }
+        if is_network_fs(&fs_type) {
+            debug!("Detected network filesystem");
+            return DriveType::Network;
         }
-        None => {
-            debug!("No disk found for path: {}", path.display());
-            DriveType::Unknown
+
+        // Use sysinfo's disk type detection
+        match disk.kind() {
+            sysinfo::DiskKind::HDD => DriveType::HDD,
+            // SSD and Unknown default to SSD
+            sysinfo::DiskKind::SSD | sysinfo::DiskKind::Unknown(_) => DriveType::SSD,
         }
+    } else {
+        debug!("No disk found for path: {}", path.display());
+        DriveType::Unknown
     }
 }

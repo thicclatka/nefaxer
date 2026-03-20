@@ -1,4 +1,4 @@
-//! Common walk loop: consumes an iterator of Ok(path) / Err and sends to path_tx, handles strict/skipped.
+//! Common walk loop: consumes an iterator of Ok(path) / Err and sends to `path_tx`, handles strict/skipped.
 
 use crossbeam_channel::Sender;
 use std::path::PathBuf;
@@ -19,7 +19,7 @@ pub fn to_outcome_jwalk(r: Result<jwalk::DirEntry<((), ())>, jwalk::Error>) -> W
     match r {
         Ok(entry) => WalkOutcome::Ok(entry.path().to_path_buf()),
         Err(err) => WalkOutcome::Err {
-            msg: format!("{}", err),
+            msg: format!("{err}"),
             path: err.path().map(PathBuf::from),
         },
     }
@@ -30,7 +30,7 @@ pub fn to_outcome_walkdir(r: Result<walkdir::DirEntry, walkdir::Error>) -> WalkO
     match r {
         Ok(entry) => WalkOutcome::Ok(entry.into_path()),
         Err(err) => WalkOutcome::Err {
-            msg: format!("{}", err),
+            msg: format!("{err}"),
             path: err.path().map(PathBuf::from),
         },
     }
@@ -60,6 +60,7 @@ fn walkdir_iter(ctx: &PipelineContext) -> Box<dyn Iterator<Item = WalkOutcome>> 
             .map(to_outcome_walkdir),
     )
 }
+#[must_use]
 pub fn spawn_walk_thread(
     path_tx: Sender<PathBuf>,
     path_count_tx: Sender<usize>,
@@ -67,23 +68,28 @@ pub fn spawn_walk_thread(
     parallel_walk: bool,
 ) -> JoinHandle<usize> {
     thread::spawn(move || {
-        let iter: Box<dyn Iterator<Item = WalkOutcome>> = match parallel_walk {
-            true => jwalk_iter(&ctx),
-            false => walkdir_iter(&ctx),
+        let iter: Box<dyn Iterator<Item = WalkOutcome>> = if parallel_walk {
+            jwalk_iter(&ctx)
+        } else {
+            walkdir_iter(&ctx)
         };
-        run_walk_loop(path_tx, path_count_tx, ctx, iter, !parallel_walk)
+        run_walk_loop(path_tx, &path_count_tx, &ctx, iter, !parallel_walk)
     })
 }
 
 /// Run the common walk loop: consume `iter` of [`WalkOutcome`], filter with `should_include_in_walk`,
-/// send included paths to `path_tx`, handle errors (strict → set first_error and break; else log and push to skipped_paths).
+/// send included paths to `path_tx`, handle errors (strict → set `first_error` and break; else log and push to `skipped_paths`).
 /// Sends total count on `path_count_tx` and drops `path_tx` when done. Returns the count of paths sent.
 /// When `track_last_path` is true (walkdir/serial), we record the last path seen and use it when an error has no path.
 /// When false (jwalk/parallel), we don't track—avoids cloning on every Ok and "last path" would be nondeterministic anyway.
+///
+/// # Panics
+///
+/// Panics if `ctx.first_error` or `ctx.skipped_paths` mutexes are poisoned.
 pub fn run_walk_loop<I>(
     path_tx: Sender<PathBuf>,
-    path_count_tx: Sender<usize>,
-    ctx: PipelineContext,
+    path_count_tx: &Sender<usize>,
+    ctx: &PipelineContext,
     iter: I,
     track_last_path: bool,
 ) -> usize
@@ -122,8 +128,7 @@ where
                         "<no-path, last was {}>",
                         last_path
                             .as_ref()
-                            .map(|p| p.display().to_string())
-                            .unwrap_or_else(|| "<none>".to_string())
+                            .map_or_else(|| "<none>".to_string(), |p| p.display().to_string())
                     ))
                 });
                 ctx.skipped_paths.lock().unwrap().push((to_push, msg));

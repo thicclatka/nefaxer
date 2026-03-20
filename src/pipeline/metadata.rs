@@ -8,20 +8,21 @@ use crate::engine::hashing::hash_file;
 use crate::engine::tools::{path_relative_to, path_to_db_string};
 use crate::utils::config::SMALL_FILE_THRESHOLD;
 
-/// Single metadata worker: read paths from path_rx, turn into entries, send on entry_tx.
-/// Hashing is done in the streaming receiver when with_hash is set, not here.
-fn metadata_worker_loop(path_rx: Receiver<PathBuf>, entry_tx: Sender<Entry>, root: PathBuf) {
+/// Single metadata worker: read paths from `path_rx`, turn into entries, send on `entry_tx`.
+/// Hashing is done in the streaming receiver when `with_hash` is set, not here.
+fn metadata_worker_loop(path_rx: &Receiver<PathBuf>, entry_tx: Sender<Entry>, root: &Path) {
     while let Ok(abs_path) = path_rx.recv() {
-        if let Ok(entry) = path_to_entry(&abs_path, &root, false) {
+        if let Ok(entry) = path_to_entry(&abs_path, root, false) {
             let _ = entry_tx.send(entry);
         }
     }
     drop(entry_tx);
 }
 
-/// Spawn metadata workers: read paths from path_rx, turn into entries, send on entry_tx. Caller must drop its sender after this so workers exit.
+/// Spawn metadata workers: read paths from `path_rx`, turn into entries, send on `entry_tx`. Caller must drop its sender after this so workers exit.
+#[must_use]
 pub fn spawn_metadata_workers(
-    path_rx: Receiver<PathBuf>,
+    path_rx: &Receiver<PathBuf>,
     entry_tx: &Sender<Entry>,
     root: &Path,
     num_threads: usize,
@@ -32,7 +33,7 @@ pub fn spawn_metadata_workers(
             let path_rx = path_rx.clone();
             let entry_tx = entry_tx.clone();
             let root = root.clone();
-            thread::spawn(move || metadata_worker_loop(path_rx, entry_tx, root))
+            thread::spawn(move || metadata_worker_loop(&path_rx, entry_tx, root.as_path()))
         })
         .collect()
 }

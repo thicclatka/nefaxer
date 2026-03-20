@@ -58,13 +58,14 @@ pub struct Cli {
     #[arg(long, num_args = 0..=1, default_missing_value = "true", value_parser = clap::value_parser!(bool))]
     pub paranoid: Option<bool>,
 
-    /// Encrypt the index database with SQLCipher. Prompts for passphrase (or use NEFAXER_DB_KEY / .env).
+    /// Encrypt the index database with `SQLCipher`. Prompts for passphrase (or use `NEFAXER_DB_KEY` / .env).
     #[arg(long, short = 'x', num_args = 0..=1, default_missing_value = "true", value_parser = clap::value_parser!(bool))]
     pub encrypt: Option<bool>,
 }
 
 impl Cli {
     /// Get the database path, defaulting to package db filename in the target directory.
+    #[must_use]
     pub fn db_path(&self) -> PathBuf {
         self.db
             .clone()

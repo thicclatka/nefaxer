@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use crate::utils::config::PackagePaths;
 
 /// Get the temporary path for the index database.
+#[must_use]
 pub fn temp_path_for(db_path: &Path) -> PathBuf {
     let name = db_path
         .file_name()
@@ -16,7 +17,7 @@ pub fn temp_path_for(db_path: &Path) -> PathBuf {
         .join(format!("{name}.tmp"))
 }
 
-/// Remove SQLite WAL and SHM files for a temp path after rename (they are left behind).
+/// Remove `SQLite` WAL and SHM files for a temp path after rename (they are left behind).
 pub fn remove_temp_wal_and_shm(temp_path: &Path) {
     let file_name = temp_path
         .file_name()
@@ -28,7 +29,12 @@ pub fn remove_temp_wal_and_shm(temp_path: &Path) {
 }
 
 /// Prepare work path for indexing: temp file and whether to use it (atomic rename).
-/// Removes stale temp and WAL/SHM; copies existing DB to temp when possible. On permission denied, falls back to writing directly to db_path.
+/// Removes stale temp and WAL/SHM; copies existing DB to temp when possible. On permission denied, falls back to writing directly to `db_path`.
+///
+/// # Errors
+///
+/// Returns [`anyhow::Error`] when removing a stale temp file or copying the existing index fails
+/// (other than permission-denied fallback cases).
 pub fn prepare_index_work_path(db_path: &Path) -> Result<(PathBuf, bool)> {
     let temp_path = temp_path_for(db_path);
     let mut use_temp = true;
@@ -62,6 +68,11 @@ pub fn prepare_index_work_path(db_path: &Path) -> Result<(PathBuf, bool)> {
     Ok((temp_path, use_temp))
 }
 
+/// Atomically replace the final index path with the temp file and remove WAL/SHM sidecars.
+///
+/// # Errors
+///
+/// Returns [`anyhow::Error`] when `std::fs::rename` fails.
 pub fn rename_temp_to_final(temp_path: &Path, final_path: &Path) -> Result<()> {
     fs::rename(temp_path, final_path).with_context(|| {
         format!(

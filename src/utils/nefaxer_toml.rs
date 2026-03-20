@@ -1,4 +1,4 @@
-//! Load `.nefaxer.toml` from a directory (CLI only). Lib does not use this; the consuming program injects config via NefaxOpts.
+//! Load `.nefaxer.toml` from a directory (CLI only). Lib does not use this; the consuming program injects config via `NefaxOpts`.
 
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -43,7 +43,7 @@ macro_rules! apply_file_opt {
     };
 }
 
-/// Apply file config to opts (only set fields present in the file). Call before applying CLI. dry_run is never in the file.
+/// Apply file config to opts (only set fields present in the file). Call before applying CLI. `dry_run` is never in the file.
 pub(crate) fn apply_file_to_opts(file: &NefaxerToml, opts: &mut Opts) {
     let idx = &file.settings;
     if let Some(ref p) = idx.db_path {
@@ -52,7 +52,7 @@ pub(crate) fn apply_file_to_opts(file: &NefaxerToml, opts: &mut Opts) {
     apply_file_opt!(idx, opts, hash => with_hash);
     apply_file_opt!(idx, opts, follow_links => follow_links);
     if let Some(ref v) = idx.exclude {
-        opts.exclude = v.clone();
+        opts.exclude.clone_from(v);
     }
     apply_file_opt!(idx, opts, list => list_paths);
     apply_file_opt!(idx, opts, verbose => verbose);

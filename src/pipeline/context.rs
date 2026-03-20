@@ -33,7 +33,7 @@ pub struct PipelineContext {
     pub skipped_paths: Arc<Mutex<Vec<(PathBuf, String)>>>,
 }
 
-/// Result of [`collect_entries`]: (entries, path_count).
+/// Result of [`collect_entries`]: (entries, `path_count`).
 pub type CollectEntriesResult = (Vec<Entry>, usize);
 
 /// Handles returned by [`run_pipeline`] for streaming: receive entries and join when done.
@@ -49,7 +49,7 @@ pub struct PipelineHandles {
     pub skipped_paths: Arc<Mutex<Vec<(PathBuf, String)>>>,
 }
 
-/// Channels and shared state for the pipeline. Walk thread gets path_tx, path_count_tx, ctx; workers get path_rx, entry_tx.
+/// Channels and shared state for the pipeline. Walk thread gets `path_tx`, `path_count_tx`, ctx; workers get `path_rx`, `entry_tx`.
 pub struct PipelineChannels {
     pub path_tx: Sender<PathBuf>,
     pub path_rx: Receiver<PathBuf>,
@@ -62,6 +62,7 @@ pub struct PipelineChannels {
     pub ctx: PipelineContext,
 }
 
+#[must_use]
 pub fn create_pipeline_channels(
     root: &Path,
     db_canonical: &Option<PathBuf>,

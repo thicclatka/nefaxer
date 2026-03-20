@@ -14,6 +14,12 @@ use crate::utils::config::DB_INSERT_BATCH_SIZE;
 use crate::{Diff, Entry, Opts, PathMeta};
 
 /// CLI dry-run: compare directory to existing index, print diff, no index write. Returns nothing.
+///
+/// # Errors
+///
+/// Returns [`crate::Error`] when the index database cannot be opened or loaded, the walk pipeline
+/// fails, thread shutdown fails, or [`crate::pipeline::check_for_initial_error_or_skipped_paths`]
+/// reports an error in strict mode.
 pub fn check_dir(root: &Path, opts: &Opts) -> Result<()> {
     let db_path = engine::create_db_path(root, opts.db_path.as_deref());
 
@@ -30,7 +36,7 @@ pub fn check_dir(root: &Path, opts: &Opts) -> Result<()> {
         ..
     } = run_pipeline(root, opts, Some(db_path.as_path()), None, &conn)?;
 
-    let diff = diff_from_stream_diff_only(entry_rx, &index, root, opts);
+    let diff = diff_from_stream_diff_only(&entry_rx, &index, root, opts);
 
     shutdown_pipeline_handles(walk_handle, worker_handles)?;
 
@@ -42,7 +48,7 @@ pub fn check_dir(root: &Path, opts: &Opts) -> Result<()> {
 
 /// Consume stream and build only the Diff (no map). Used by CLI dry-run.
 fn diff_from_stream_diff_only(
-    entry_rx: Receiver<Entry>,
+    entry_rx: &Receiver<Entry>,
     index: &HashMap<PathBuf, engine::StoredMeta>,
     root: &Path,
     opts: &Opts,
@@ -83,9 +89,10 @@ fn diff_from_stream_diff_only(
 }
 
 /// Consume entries from the pipeline and build Diff and current index incrementally.
-/// Returns (Diff, current index as path → PathMeta). Same shape as the DB; available whether or not we write to DB.
+/// Returns (Diff, current index as path → `PathMeta`). Same shape as the DB; available whether or not we write to DB.
+#[must_use]
 pub fn diff_from_stream(
-    entry_rx: Receiver<Entry>,
+    entry_rx: &Receiver<Entry>,
     index: &HashMap<PathBuf, engine::StoredMeta>,
     root: &Path,
     opts: &Opts,
@@ -95,7 +102,7 @@ pub fn diff_from_stream(
 
 /// Like [`diff_from_stream`] but invokes `on_entry` for each entry (after hash fill). Use for streaming progress or forwarding to another stage (e.g. zahir).
 pub fn diff_from_stream_with_callback<F>(
-    entry_rx: Receiver<Entry>,
+    entry_rx: &Receiver<Entry>,
     index: &HashMap<PathBuf, engine::StoredMeta>,
     root: &Path,
     opts: &Opts,
@@ -108,7 +115,7 @@ where
 }
 
 fn diff_from_stream_impl(
-    entry_rx: Receiver<Entry>,
+    entry_rx: &Receiver<Entry>,
     index: &HashMap<PathBuf, engine::StoredMeta>,
     root: &Path,
     opts: &Opts,
@@ -182,7 +189,7 @@ fn collect_entry_into_diff(
             }
             let still_modified = if opts.paranoid
                 && entry.hash.is_some()
-                && old_hash.as_ref().map(|v| v.len() == 32).unwrap_or(false)
+                && old_hash.as_ref().is_some_and(|v| v.len() == 32)
                 && engine::hash_equals(&entry.hash, old_hash)
             {
                 let abs = root.join(&entry.path);
@@ -190,10 +197,9 @@ fn collect_entry_into_diff(
                     Ok(meta) if meta.is_file() => engine::hash_file(&abs, meta.len())
                         .ok()
                         .flatten()
-                        .map(|rehash: [u8; 32]| {
+                        .is_none_or(|rehash: [u8; 32]| {
                             rehash.as_slice() != old_hash.as_deref().unwrap_or(&[0u8; 32])
-                        })
-                        .unwrap_or(true),
+                        }),
                     _ => true,
                 }
             } else {

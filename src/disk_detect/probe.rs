@@ -47,7 +47,7 @@ pub struct DiskTypeInfo {
     pub tested_at: u64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NetworkInfo {
     /// Average latency in milliseconds
     pub latency_ms: f64,
@@ -57,7 +57,12 @@ pub struct NetworkInfo {
 
 /// Detect optimal worker count. For network drives optionally uses DB cache (when `conn` is Some).
 /// When `conn` is None, probe still runs for network drives but result is not cached.
-/// Returns (workers, use_parallel_walk). use_parallel_walk is true when disk type is SSD.
+/// Returns (workers, `use_parallel_walk`). `use_parallel_walk` is true when disk type is SSD.
+///
+/// # Errors
+///
+/// Returns [`anyhow::Error`] when disk probing, latency measurement, or writing the cache to the
+/// database fails.
 pub fn detect_optimal_workers(
     path: &Path,
     base_drive_type: DriveType,
@@ -83,7 +88,7 @@ pub fn detect_optimal_workers(
             }
             Ok(None) => None,
             Err(e) => {
-                debug!("Failed to load cache: {}, will re-probe", e);
+                debug!("Failed to load cache: {e}, will re-probe");
                 None
             }
         },
@@ -105,6 +110,7 @@ pub fn detect_optimal_workers(
     // Calculate optimal workers
     let workers = calculate_workers(&disk_type_info, &network_info);
     let use_parallel_walk = disk_type_info.drive_type.contains("SSD");
+    let network_latency_ms = network_info.latency_ms;
 
     // Save cache to DB only when conn is provided
     if let Some(c) = conn {
@@ -116,14 +122,12 @@ pub fn detect_optimal_workers(
         save_cache_to_db(c, &root_key, &cache_data)?;
         debug!(
             "Drive: {}, Network latency: {:.1}ms, Workers: {}",
-            cache_data.disk_type.drive_type,
-            cache_data.network.as_ref().unwrap().latency_ms,
-            workers
+            cache_data.disk_type.drive_type, network_latency_ms, workers
         );
     } else {
         debug!(
             "Drive: {}, Network latency: {:.1}ms, Workers: {}",
-            disk_type_info.drive_type, network_info.latency_ms, workers
+            disk_type_info.drive_type, network_latency_ms, workers
         );
     }
 
@@ -141,7 +145,7 @@ fn probe_disk_type(base_path: &Path) -> Result<DiskTypeInfo> {
     // Create test files and measure time
     let start = Instant::now();
     for i in 0..ProbeConsts::NUM_FILES {
-        let file_path = probe_dir.join(format!("test_{}.dat", i));
+        let file_path = probe_dir.join(format!("test_{i}.dat"));
         let mut file = File::create(&file_path)?;
         file.write_all(&data)?;
         // Try to sync but don't fail if not supported (SMB on macOS doesn't support fsync)
@@ -161,7 +165,8 @@ fn probe_disk_type(base_path: &Path) -> Result<DiskTypeInfo> {
     fs::remove_dir_all(&probe_dir).ok();
 
     // Calculate IOPS
-    let total_ops = (ProbeConsts::NUM_FILES * 2) as f64; // Create + read
+    // Create + read; fits in u32 → f64 without precision loss (clippy cast_precision_loss).
+    let total_ops = f64::from((ProbeConsts::NUM_FILES * 2) as u32);
     let total_time_secs = (create_time + read_time).as_secs_f64();
     let iops = total_ops / total_time_secs;
 
@@ -198,9 +203,10 @@ fn measure_network_latency(path: &Path) -> Result<NetworkInfo> {
     }
     let elapsed = start.elapsed();
 
-    let avg_latency_ms = elapsed.as_secs_f64() * 1000.0 / ProbeConsts::NUM_LATENCY_SAMPLES as f64;
+    let avg_latency_ms =
+        elapsed.as_secs_f64() * 1000.0 / f64::from(ProbeConsts::NUM_LATENCY_SAMPLES as u32);
 
-    debug!("Network latency: {:.2}ms avg", avg_latency_ms);
+    debug!("Network latency: {avg_latency_ms:.2}ms avg");
 
     Ok(NetworkInfo {
         latency_ms: avg_latency_ms,
@@ -212,7 +218,7 @@ fn measure_network_latency(path: &Path) -> Result<NetworkInfo> {
 }
 
 /// Calculate optimal worker count based on disk type and network conditions.
-/// Decision matrix: HDD+high latency → floor; HDD+low → hdd_max; SSD+high → hdd_max; SSD+low → network_max.
+/// Decision matrix: HDD+high latency → floor; HDD+low → `hdd_max`; SSD+high → `hdd_max`; SSD+low → `network_max`.
 fn calculate_workers(disk_type: &DiskTypeInfo, network: &NetworkInfo) -> usize {
     let limits = WorkerThreadLimits::current();
     let is_hdd = DriveType::from_disk_type_str(&disk_type.drive_type).is_hdd();
